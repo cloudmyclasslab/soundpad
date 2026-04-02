@@ -199,6 +199,79 @@ function EditModal({ pad, onSave, onClose }) {
   </>;
 }
 
+
+// ── Help Panel ────────────────────────────────────────────────
+function HelpPanel({ open, onClose }) {
+  const dg = useRef({on:false,y0:0,dy:0});
+  const [ty, setTy] = useState(0);
+  useEffect(() => { if (open) setTy(0); }, [open]);
+  const hDown = e => { dg.current={on:true,y0:e.clientY||e.touches?.[0]?.clientY||0,dy:0}; };
+  const hMove = e => { if(!dg.current.on) return; const y=Math.max(0,(e.clientY||e.touches?.[0]?.clientY||0)-dg.current.y0); dg.current.dy=y; setTy(y); };
+  const hUp   = () => { if(!dg.current.on) return; dg.current.on=false; if(dg.current.dy>120){onClose();setTy(0);}else setTy(0); };
+  if (!open) return null;
+  const sec = { color:'#4CC9F0', fontSize:12, fontWeight:800, letterSpacing:1, marginBottom:12, display:'block' };
+  const item = { display:'flex', alignItems:'flex-start', gap:12, marginBottom:14 };
+  const icon = { fontSize:22, flexShrink:0, marginTop:1 };
+  const txt  = { color:'#ccc', fontSize:13, lineHeight:1.7 };
+  const bold = { color:'#fff', fontWeight:700 };
+  return <>
+    <div onClick={onClose} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:200 }} />
+    <div onMouseMove={hMove} onMouseUp={hUp} onTouchMove={hMove} onTouchEnd={hUp}
+      style={{ position:'fixed',bottom:0,left:0,right:0,background:'#111128',borderRadius:'20px 20px 0 0',padding:'0 24px 44px',zIndex:201,animation:ty===0?'slideUp 0.25s ease-out':'none',transform:`translateY(${ty}px)`,transition:dg.current.on?'none':'transform 0.25s ease-out',maxHeight:'88vh',overflowY:'auto' }}>
+      <div onMouseDown={hDown} onTouchStart={hDown} style={{ width:'100%',padding:'16px 0 20px',cursor:'grab',touchAction:'none' }}>
+        <div style={{ width:40,height:4,background:'#444',borderRadius:2,margin:'0 auto' }} />
+      </div>
+      <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:28 }}>
+        <span style={{ color:'#fff',fontWeight:800,fontSize:16 }}>📖 사용방법</span>
+        <button onClick={onClose} style={{ background:'none',border:'none',color:'#555',fontSize:20,cursor:'pointer' }}>✕</button>
+      </div>
+
+      {/* 기본 모드 */}
+      <span style={sec}>🔹 기본 모드</span>
+      <div style={item}><span style={icon}>▶️</span><span style={txt}><span style={bold}>재생 모드</span>: 패드를 탭하면 녹화된 영상 또는 소리가 재생됩니다. 여러 패드를 동시에 탭할 수 있어요.</span></div>
+      <div style={item}><span style={icon}>🔴</span><span style={txt}><span style={bold}>녹화 모드</span>: 우측 상단 버튼으로 전환합니다. 이 모드에서 패드를 탭하면 녹화가 시작됩니다.</span></div>
+
+      {/* 녹화 */}
+      <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
+      <span style={sec}>🔹 녹화하기</span>
+      <div style={item}><span style={icon}>1️⃣</span><span style={txt}>녹화 모드에서 <span style={bold}>빈 패드를 탭</span>하면 3·2·1 카운트다운 후 녹화가 시작됩니다.</span></div>
+      <div style={item}><span style={icon}>2️⃣</span><span style={txt}>카메라 화면이 보이고, <span style={bold}>⏹ 녹화 완료</span>를 누르거나 시간이 다 되면 자동으로 저장됩니다.</span></div>
+      <div style={item}><span style={icon}>3️⃣</span><span style={txt}>이미 녹화된 패드를 탭하면 <span style={bold}>덮어쓰기 확인</span> 메시지가 나타납니다.</span></div>
+
+      {/* 편집 */}
+      <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
+      <span style={sec}>🔹 패드 편집 (녹화 모드)</span>
+      <div style={item}><span style={icon}>✏️</span><span style={txt}>패드 <span style={bold}>좌상단 ✏️ 버튼</span>을 누르면 이름, 볼륨, 썸네일 이미지를 수정할 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>✕</span><span style={txt}>패드 <span style={bold}>우상단 ✕ 버튼</span>을 누르면 해당 패드의 녹화 내용을 삭제합니다.</span></div>
+      <div style={item}><span style={icon}>👆</span><span style={txt}>패드를 <span style={bold}>길게 누르면</span> 드래그해서 순서를 바꿀 수 있습니다.</span></div>
+
+      {/* 음성/영상 */}
+      <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
+      <span style={sec}>🔹 녹화 방식</span>
+      <div style={item}><span style={icon}>🎬</span><span style={txt}><span style={bold}>영상 녹화</span>: 카메라와 소리를 함께 녹화합니다. 재생 시 영상이 패드 위에 표시됩니다.</span></div>
+      <div style={item}><span style={icon}>🎙</span><span style={txt}><span style={bold}>음성 녹음</span>: 소리만 녹음합니다. 카메라 없이 간단하게 녹음할 수 있어요.</span></div>
+      <div style={item}><span style={icon}>⚙️</span><span style={txt}>환경설정에서 <span style={bold}>기본 기록 방식</span>을 전환할 수 있습니다.</span></div>
+
+      {/* 환경설정 */}
+      <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
+      <span style={sec}>🔹 환경설정</span>
+      <div style={item}><span style={icon}>⚙️</span><span style={txt}>우측 상단 ⚙️ 버튼 또는 <span style={bold}>아래로 드래그</span>해서 닫을 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>📐</span><span style={txt}>가로·세로 패드 수, 최대 녹화 시간, 전체 볼륨, 카메라 방향을 설정할 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>💾</span><span style={txt}>모든 녹화 내용은 <span style={bold}>녹화 완료 후 자동 저장</span>됩니다. 브라우저를 닫아도 유지됩니다.</span></div>
+
+      <div style={{ marginTop:24,padding:'14px 16px',background:'#0d0d1a',borderRadius:12,border:'1px solid #1e1e3a' }}>
+        <div style={{ color:'#555',fontSize:11,lineHeight:1.8 }}>
+          💡 <span style={{ color:'#4CC9F0' }}>교육 활용 팁</span>: 동물 소리, 악기, 단어 발음 등을 녹화해서 학생들이 탭으로 퀴즈를 풀 수 있어요. 음성 녹음 모드는 말하기 연습에, 영상 녹화 모드는 몸짓·표정 표현 학습에 적합합니다.
+        </div>
+      </div>
+
+      <button onClick={onClose} style={{ width:'100%',marginTop:20,padding:'13px 0',borderRadius:12,border:'none',background:'linear-gradient(135deg,#4CC9F0,#4361EE)',color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer' }}>
+        확인
+      </button>
+    </div>
+  </>;
+}
+
 // ── Settings ──────────────────────────────────────────────────
 function Settings({ open, onClose, cfg, set, onReset }) {
   const dg = useRef({on:false,y0:0,dy:0});
@@ -312,6 +385,7 @@ function App() {
   const [currentRecType, setCurrentRecType] = useState('video'); // type being recorded now
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showHelp,     setShowHelp]     = useState(false);
   const [editPad,      setEditPad]      = useState(null);
   const [confirm,      setConfirm]      = useState(null);
   const [toast,        setToast]        = useState(null);
@@ -704,6 +778,7 @@ function App() {
           </div>
         </div>
         <div style={{ display:'flex',gap:7,alignItems:'center' }}>
+          <button onClick={()=>setShowHelp(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>❓</button>
           <button onClick={()=>setShowSettings(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>⚙️</button>
           <button onClick={()=>setMode(m=>m==='play'?'record':'play')} style={{ height:38,padding:'0 14px',borderRadius:50,border:'none',background:mode==='record'?'linear-gradient(135deg,#FF4D6D,#FF6B35)':'linear-gradient(135deg,#06D6A0,#4CC9F0)',color:'#fff',fontWeight:700,fontSize:12,cursor:'pointer',boxShadow:mode==='record'?'0 0 16px rgba(255,77,109,0.5)':'0 0 16px rgba(6,214,160,0.4)' }}>
             {mode==='record' ? '🔴 녹화' : '▶ 재생'}
@@ -858,6 +933,7 @@ function App() {
         </div>
       )}
 
+      <HelpPanel open={showHelp} onClose={()=>setShowHelp(false)} />
       <Settings open={showSettings} onClose={()=>setShowSettings(false)} cfg={{cols,rows,maxRecMs,globalVolume,cameraFacing,defaultRecType}} set={setSetting} onReset={handleReset} />
       {editPad&&<EditModal pad={pads[editPad.idx]} onSave={saveEdit} onClose={()=>setEditPad(null)} />}
       {confirm&&<Confirm msg={confirm.msg} onOk={confirm.onOk} onCancel={()=>setConfirm(null)} />}
