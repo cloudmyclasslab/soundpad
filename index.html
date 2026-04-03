@@ -234,39 +234,41 @@ function HelpPanel({ open, onClose }) {
       {/* 기본 모드 */}
       <span style={sec}>🔹 기본 모드</span>
       <div style={item}><span style={icon}>▶️</span><span style={txt}><span style={bold}>재생 모드</span>: 패드를 탭하면 녹화된 영상 또는 소리가 재생됩니다. 여러 패드를 동시에 탭할 수 있어요.</span></div>
-      <div style={item}><span style={icon}>🔴</span><span style={txt}><span style={bold}>녹화 모드</span>: 우측 상단 버튼으로 전환합니다. 이 모드에서 패드를 탭하면 녹화가 시작됩니다.</span></div>
+      <div style={item}><span style={icon}>🔴</span><span style={txt}><span style={bold}>녹화/녹음 모드</span>: 우측 상단 버튼으로 전환합니다. 현재 기록 방식에 따라 버튼이 <span style={bold}>🔴 녹화</span> 또는 <span style={bold}>🎙 녹음</span>으로 표시됩니다.</span></div>
 
-      {/* 녹화 */}
+      {/* 녹화/녹음 */}
       <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
-      <span style={sec}>🔹 녹화하기</span>
-      <div style={item}><span style={icon}>1️⃣</span><span style={txt}>녹화 모드에서 <span style={bold}>빈 패드를 탭</span>하면 3·2·1 카운트다운 후 녹화가 시작됩니다.</span></div>
-      <div style={item}><span style={icon}>2️⃣</span><span style={txt}>카메라 화면이 보이고, <span style={bold}>⏹ 녹화 완료</span>를 누르거나 시간이 다 되면 자동으로 저장됩니다.</span></div>
+      <span style={sec}>🔹 녹화 · 녹음하기</span>
+      <div style={item}><span style={icon}>1️⃣</span><span style={txt}>녹화/녹음 모드에서 <span style={bold}>빈 패드를 탭</span>하면 3·2·1 카운트다운 후 시작됩니다.</span></div>
+      <div style={item}><span style={icon}>🎬</span><span style={txt}><span style={bold}>영상 녹화</span>: 카메라 화면이 보이며 영상+소리를 함께 녹화합니다. <span style={bold}>⏹ 녹화 완료</span>를 누르거나 시간이 다 되면 자동 저장됩니다.</span></div>
+      <div style={item}><span style={icon}>🎙</span><span style={txt}><span style={bold}>음성 녹음</span>: 카메라 없이 소리만 녹음합니다. 화면에 파형 애니메이션이 표시되며, <span style={bold}>⏹ 녹음 완료</span>를 누르면 저장됩니다.</span></div>
       <div style={item}><span style={icon}>3️⃣</span><span style={txt}>이미 녹화된 패드를 탭하면 <span style={bold}>덮어쓰기 확인</span> 메시지가 나타납니다.</span></div>
 
       {/* 편집 */}
       <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
-      <span style={sec}>🔹 패드 편집 (녹화 모드)</span>
+      <span style={sec}>🔹 패드 편집 (녹화/녹음 모드)</span>
       <div style={item}><span style={icon}>✏️</span><span style={txt}>패드 <span style={bold}>좌상단 ✏️ 버튼</span>을 누르면 이름, 볼륨, 썸네일 이미지를 수정할 수 있습니다.</span></div>
-      <div style={item}><span style={icon}>✕</span><span style={txt}>패드 <span style={bold}>우상단 ✕ 버튼</span>을 누르면 해당 패드의 녹화 내용을 삭제합니다.</span></div>
+      <div style={item}><span style={icon}>📁</span><span style={txt}>✏️ 편집 화면에서 <span style={bold}>이미지 변경</span>을 누르면 사진 앨범에서 썸네일을 직접 설정할 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>✕</span><span style={txt}>패드 <span style={bold}>우상단 ✕ 버튼</span>을 누르면 해당 패드의 내용을 삭제합니다.</span></div>
       <div style={item}><span style={icon}>👆</span><span style={txt}>패드를 <span style={bold}>길게 누르면</span> 드래그해서 순서를 바꿀 수 있습니다.</span></div>
 
-      {/* 음성/영상 */}
+      {/* 기록 방식 */}
       <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
-      <span style={sec}>🔹 녹화 방식</span>
-      <div style={item}><span style={icon}>🎬</span><span style={txt}><span style={bold}>영상 녹화</span>: 카메라와 소리를 함께 녹화합니다. 재생 시 영상이 패드 위에 표시됩니다.</span></div>
-      <div style={item}><span style={icon}>🎙</span><span style={txt}><span style={bold}>음성 녹음</span>: 소리만 녹음합니다. 카메라 없이 간단하게 녹음할 수 있어요.</span></div>
-      <div style={item}><span style={icon}>⚙️</span><span style={txt}>환경설정에서 <span style={bold}>기본 기록 방식</span>을 전환할 수 있습니다.</span></div>
+      <span style={sec}>🔹 기록 방식 전환</span>
+      <div style={item}><span style={icon}>⚙️</span><span style={txt}>환경설정 → <span style={bold}>기본 기록 방식</span>에서 영상 녹화와 음성 녹음을 전환할 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>🔀</span><span style={txt}>방식을 바꾸면 우측 상단 버튼 텍스트도 <span style={bold}>🔴 녹화 ↔ 🎙 녹음</span>으로 함께 바뀝니다.</span></div>
+      <div style={item}><span style={icon}>📋</span><span style={txt}>각 패드는 녹화 당시의 방식(영상/음성)을 기억합니다. 영상 패드와 음성 패드를 <span style={bold}>혼합해서 사용</span>할 수 있어요.</span></div>
 
       {/* 환경설정 */}
       <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
       <span style={sec}>🔹 환경설정</span>
-      <div style={item}><span style={icon}>⚙️</span><span style={txt}>우측 상단 ⚙️ 버튼 또는 <span style={bold}>아래로 드래그</span>해서 닫을 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>⚙️</span><span style={txt}>상단 핸들을 <span style={bold}>아래로 드래그</span>하거나 ✕ 버튼으로 닫을 수 있습니다.</span></div>
       <div style={item}><span style={icon}>📐</span><span style={txt}>가로·세로 패드 수, 최대 녹화 시간, 전체 볼륨, 카메라 방향을 설정할 수 있습니다.</span></div>
-      <div style={item}><span style={icon}>💾</span><span style={txt}>모든 녹화 내용은 <span style={bold}>녹화 완료 후 자동 저장</span>됩니다. 브라우저를 닫아도 유지됩니다.</span></div>
+      <div style={item}><span style={icon}>💾</span><span style={txt}>모든 내용은 <span style={bold}>완료 후 자동 저장</span>됩니다. 브라우저를 닫아도 유지됩니다.</span></div>
 
       <div style={{ marginTop:24,padding:'14px 16px',background:'#0d0d1a',borderRadius:12,border:'1px solid #1e1e3a' }}>
         <div style={{ color:'#555',fontSize:11,lineHeight:1.8 }}>
-          💡 <span style={{ color:'#4CC9F0' }}>교육 활용 팁</span>: 동물 소리, 악기, 단어 발음 등을 녹화해서 학생들이 탭으로 퀴즈를 풀 수 있어요. 음성 녹음 모드는 말하기 연습에, 영상 녹화 모드는 몸짓·표정 표현 학습에 적합합니다.
+          💡 <span style={{ color:'#4CC9F0' }}>교육 활용 팁</span>: 동물 소리·악기·단어 발음을 녹화해 퀴즈로 활용해 보세요. 음성 녹음은 말하기 연습에, 영상 녹화는 몸짓·표정 표현 학습에 적합합니다. 패드별 이름과 이미지를 설정하면 학생들이 더 직관적으로 사용할 수 있어요.
         </div>
       </div>
 
