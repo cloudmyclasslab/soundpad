@@ -200,6 +200,119 @@ function EditModal({ pad, onSave, onClose }) {
 }
 
 
+
+// ── Config Panel ──────────────────────────────────────────────
+function ConfigPanel({ open, onClose, onSave, onLoad, onDeleteCfg }) {
+  const dg = useRef({on:false,y0:0,dy:0});
+  const [ty, setTy]         = useState(0);
+  const [configs, setConfigs] = useState([]);
+  const [nameInput, setName]  = useState('');
+  const [saving, setSaving]   = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => { if (open) { setTy(0); loadList(); } }, [open]);
+
+  const loadList = async () => {
+    const list = await dbGet('cfg_list') || [];
+    setConfigs(list);
+  };
+
+  const hDown = e => { dg.current={on:true,y0:e.clientY||e.touches?.[0]?.clientY||0,dy:0}; };
+  const hMove = e => { if(!dg.current.on) return; const y=Math.max(0,(e.clientY||e.touches?.[0]?.clientY||0)-dg.current.y0); dg.current.dy=y; setTy(y); };
+  const hUp   = () => { if(!dg.current.on) return; dg.current.on=false; if(dg.current.dy>120){onClose();setTy(0);}else setTy(0); };
+
+  const handleSave = async () => {
+    const name = nameInput.trim() || `구성 ${configs.length + 1}`;
+    setSaving(true);
+    await onSave(name);
+    setName('');
+    await loadList();
+    setSaving(false);
+  };
+
+  const handleLoad = async (cfg) => {
+    setLoading(true);
+    await onLoad(cfg);
+    setLoading(false);
+    onClose();
+  };
+
+  const handleDelete = async (cfg) => {
+    await onDeleteCfg(cfg);
+    await loadList();
+  };
+
+  const fmtDate = ts => {
+    const d = new Date(ts);
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  };
+
+  if (!open) return null;
+  return <>
+    <div onClick={onClose} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:200 }} />
+    <div onMouseMove={hMove} onMouseUp={hUp} onTouchMove={hMove} onTouchEnd={hUp}
+      style={{ position:'fixed',bottom:0,left:0,right:0,background:'#111128',borderRadius:'20px 20px 0 0',zIndex:201,animation:ty===0?'slideUp 0.25s ease-out':'none',transform:`translateY(${ty}px)`,transition:dg.current.on?'none':'transform 0.25s ease-out',maxHeight:'calc(100dvh - 100px)',display:'flex',flexDirection:'column' }}>
+
+      {/* 고정 헤더 */}
+      <div style={{ flexShrink:0,background:'#111128',borderRadius:'20px 20px 0 0',padding:'0 24px 0' }}>
+        <div onMouseDown={hDown} onTouchStart={hDown} style={{ width:'100%',padding:'16px 0 14px',cursor:'grab',touchAction:'none' }}>
+          <div style={{ width:40,height:4,background:'#555',borderRadius:2,margin:'0 auto' }} />
+        </div>
+        <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',paddingBottom:20 }}>
+          <span style={{ color:'#fff',fontWeight:800,fontSize:16 }}>📂 구성 관리</span>
+          <button onClick={onClose} style={{ width:32,height:32,borderRadius:'50%',border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✕</button>
+        </div>
+      </div>
+
+      {/* 스크롤 영역 */}
+      <div style={{ overflowY:'auto',flex:1,padding:'0 24px 44px' }}>
+
+        {/* 현재 구성 저장 */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ color:'#666',fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:10 }}>현재 구성 저장</div>
+          <div style={{ display:'flex',gap:8 }}>
+            <input
+              type="text"
+              value={nameInput}
+              onChange={e=>setName(e.target.value)}
+              onKeyDown={e=>e.key==='Enter'&&handleSave()}
+              placeholder="구성 이름 입력..."
+              maxLength={20}
+              style={{ flex:1 }}
+            />
+            <button onClick={handleSave} disabled={saving} style={{ padding:'0 16px',borderRadius:8,border:'none',background:'linear-gradient(135deg,#4CC9F0,#4361EE)',color:'#fff',fontWeight:700,fontSize:13,cursor:saving?'default':'pointer',flexShrink:0,opacity:saving?0.6:1 }}>
+              {saving ? '저장 중...' : '💾 저장'}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ height:1,background:'#1e1e3a',marginBottom:20 }} />
+
+        {/* 저장된 구성 목록 */}
+        <div style={{ color:'#666',fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:12 }}>저장된 구성</div>
+        {configs.length === 0 ? (
+          <div style={{ color:'#444',fontSize:13,textAlign:'center',padding:'32px 0' }}>저장된 구성이 없습니다</div>
+        ) : (
+          configs.slice().reverse().map(cfg => (
+            <div key={cfg.id} style={{ display:'flex',alignItems:'center',gap:10,marginBottom:12,padding:'14px',background:'#0d0d1a',borderRadius:12,border:'1px solid #1e1e3a' }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ color:'#fff',fontWeight:700,fontSize:14,marginBottom:3,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>{cfg.name}</div>
+                <div style={{ color:'#555',fontSize:11 }}>{fmtDate(cfg.createdAt)} · {cfg.cols}×{cfg.rows} · {cfg.padCount}개 패드</div>
+              </div>
+              <button onClick={()=>handleLoad(cfg)} disabled={loading} style={{ padding:'8px 14px',borderRadius:8,border:'none',background:'linear-gradient(135deg,#06D6A0,#4CC9F0)',color:'#000',fontWeight:700,fontSize:12,cursor:'pointer',flexShrink:0 }}>
+                불러오기
+              </button>
+              <button onClick={()=>handleDelete(cfg)} style={{ width:30,height:30,borderRadius:8,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#FF4D6D',fontSize:14,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0 }}>
+                🗑
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  </>;
+}
+
 // ── Help Panel ────────────────────────────────────────────────
 function HelpPanel({ open, onClose }) {
   const dg = useRef({on:false,y0:0,dy:0});
@@ -259,16 +372,23 @@ function HelpPanel({ open, onClose }) {
       <div style={item}><span style={icon}>🔀</span><span style={txt}>방식을 바꾸면 우측 상단 버튼 텍스트도 <span style={bold}>🔴 녹화 ↔ 🎙 녹음</span>으로 함께 바뀝니다.</span></div>
       <div style={item}><span style={icon}>📋</span><span style={txt}>각 패드는 녹화 당시의 방식(영상/음성)을 기억합니다. 영상 패드와 음성 패드를 <span style={bold}>혼합해서 사용</span>할 수 있어요.</span></div>
 
+      {/* 구성 관리 */}
+      <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
+      <span style={sec}>🔹 구성 관리 (📂)</span>
+      <div style={item}><span style={icon}>💾</span><span style={txt}>상단 <span style={bold}>📂 버튼</span>을 누르면 현재 패드 구성을 이름을 붙여 저장할 수 있습니다.</span></div>
+      <div style={item}><span style={icon}>📋</span><span style={txt}>저장된 구성 목록에서 <span style={bold}>불러오기</span>를 누르면 해당 패드 배치와 내용이 그대로 복원됩니다.</span></div>
+      <div style={item}><span style={icon}>🔀</span><span style={txt}>수업별로 구성을 저장해두면 필요할 때 빠르게 전환할 수 있습니다. 예: "1교시 동물 소리", "2교시 악기"</span></div>
+
       {/* 환경설정 */}
       <div style={{ height:1,background:'#1e1e3a',margin:'8px 0 20px' }} />
-      <span style={sec}>🔹 환경설정</span>
+      <span style={sec}>🔹 환경설정 (⚙️)</span>
       <div style={item}><span style={icon}>⚙️</span><span style={txt}>상단 핸들을 <span style={bold}>아래로 드래그</span>하거나 ✕ 버튼으로 닫을 수 있습니다.</span></div>
       <div style={item}><span style={icon}>📐</span><span style={txt}>가로·세로 패드 수, 최대 녹화 시간, 전체 볼륨, 카메라 방향을 설정할 수 있습니다.</span></div>
-      <div style={item}><span style={icon}>💾</span><span style={txt}>모든 내용은 <span style={bold}>완료 후 자동 저장</span>됩니다. 브라우저를 닫아도 유지됩니다.</span></div>
+      <div style={item}><span style={icon}>🔄</span><span style={txt}>모든 내용은 <span style={bold}>완료 후 자동 저장</span>됩니다. 브라우저를 닫아도 유지됩니다.</span></div>
 
       <div style={{ marginTop:24,padding:'14px 16px',background:'#0d0d1a',borderRadius:12,border:'1px solid #1e1e3a' }}>
         <div style={{ color:'#555',fontSize:11,lineHeight:1.8 }}>
-          💡 <span style={{ color:'#4CC9F0' }}>교육 활용 팁</span>: 동물 소리·악기·단어 발음을 녹화해 퀴즈로 활용해 보세요. 음성 녹음은 말하기 연습에, 영상 녹화는 몸짓·표정 표현 학습에 적합합니다. 패드별 이름과 이미지를 설정하면 학생들이 더 직관적으로 사용할 수 있어요.
+          💡 <span style={{ color:'#4CC9F0' }}>교육 활용 팁</span>: 동물 소리·악기·단어 발음을 녹화해 퀴즈로 활용해 보세요. 음성 녹음은 말하기 연습에, 영상 녹화는 몸짓·표정 표현 학습에 적합합니다. 수업 주제별로 구성을 저장해두면 매 수업 준비 시간을 줄일 수 있어요.
         </div>
       </div>
 
@@ -400,6 +520,7 @@ function App() {
 
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp,     setShowHelp]     = useState(false);
+  const [showConfig,   setShowConfig]   = useState(false);
   const [editPad,      setEditPad]      = useState(null);
   const [confirm,      setConfirm]      = useState(null);
   const [toast,        setToast]        = useState(null);
@@ -577,6 +698,48 @@ function App() {
     }});
   };
 
+
+  // ── Config save/load ─────────────────────────────────────────
+  const handleSaveConfig = async name => {
+    const id = Date.now().toString();
+    const padMeta = padsRef.current.map(p => p ? { thumb:p.thumb, label:p.label, volume:p.volume, recType:p.recType } : null);
+    // Save blobs under config namespace
+    await Promise.all(padsRef.current.map(async (p, i) => {
+      if (p?.url) { const blob = await fetch(p.url).then(r=>r.blob()); await dbPut(`cfg_${id}_blob_${i}`, blob); }
+    }));
+    const entry = { id, name, createdAt: Date.now(), cols, rows, padCount: padsRef.current.filter(Boolean).length, padMeta };
+    const list = await dbGet('cfg_list') || [];
+    list.push(entry);
+    await dbPut('cfg_list', list);
+    showToast(`✅ '${name}' 저장됐습니다`);
+  };
+
+  const handleLoadConfig = async cfg => {
+    const { id, cols:c, rows:r, padMeta } = cfg;
+    // Revoke old URLs
+    padsRef.current.forEach(p => { if (p?.url) URL.revokeObjectURL(p.url); });
+    const total = c * r;
+    const np = Array(total).fill(null);
+    for (let i = 0; i < total; i++) {
+      if (padMeta?.[i]) {
+        const blob = await dbGet(`cfg_${id}_blob_${i}`);
+        if (blob) np[i] = { url: URL.createObjectURL(blob), ...padMeta[i] };
+      }
+    }
+    setCols(c); setRows(r);
+    padsRef.current = np; setPads(np);
+    setPlayKeys({});
+    showToast(`✅ '${cfg.name}' 불러왔습니다`);
+  };
+
+  const handleDeleteConfig = async cfg => {
+    // Delete blobs
+    const total = cfg.cols * cfg.rows;
+    await Promise.all(Array.from({length:total}, (_,i) => dbDel(`cfg_${cfg.id}_blob_${i}`)));
+    const list = await dbGet('cfg_list') || [];
+    await dbPut('cfg_list', list.filter(c => c.id !== cfg.id));
+  };
+
   // ── Record ───────────────────────────────────────────────────
   const cancelRecordFlow = useCallback(() => {
     cancelledRef.current = true;
@@ -678,7 +841,12 @@ function App() {
   // ── Play ─────────────────────────────────────────────────────
   const playPad = useCallback(idx => {
     if (!padsRef.current[idx]) return;
-    setPlayKeys(k => ({ ...k, [idx]:(k[idx]||0)+1 }));
+    // 기존 재생 중인 모든 패드를 중단하고 새 패드만 재생
+    setPlayKeys(k => {
+      const next = {};
+      next[idx] = (k[idx] || 0) + 1;
+      return next;
+    });
   }, []);
   const stopPad = useCallback(idx => {
     setPlayKeys(k => { const n={...k}; delete n[idx]; return n; });
@@ -748,7 +916,7 @@ function App() {
       clearTimeout(pressRef.current.timer); pressRef.current = null;
       if (recIdx !== null) return;
       if (padsRef.current[idx]) {
-        setConfirm({ msg:'패드를 다시 녹화할까요?\n기존 녹화가 삭제됩니다.', onOk:()=>{ setConfirm(null); startRecordFlow(idx); } });
+        setConfirm({ msg: defRecTypeRef.current==='audio' ? '패드를 다시 녹음할까요?\n기존 녹음이 삭제됩니다.' : '패드를 다시 녹화할까요?\n기존 녹화가 삭제됩니다.', onOk:()=>{ setConfirm(null); startRecordFlow(idx); } });
       } else {
         startRecordFlow(idx);
       }
@@ -792,6 +960,7 @@ function App() {
           </div>
         </div>
         <div style={{ display:'flex',gap:7,alignItems:'center' }}>
+          <button onClick={()=>setShowConfig(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>📂</button>
           <button onClick={()=>setShowHelp(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>❓</button>
           <button onClick={()=>setShowSettings(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>⚙️</button>
           <button onClick={()=>setMode(m=>m==='play'?'record':'play')} style={{ height:38,padding:'0 14px',borderRadius:50,border:'none',background:mode==='record'?'linear-gradient(135deg,#FF4D6D,#FF6B35)':'linear-gradient(135deg,#06D6A0,#4CC9F0)',color:'#fff',fontWeight:700,fontSize:12,cursor:'pointer',boxShadow:mode==='record'?'0 0 16px rgba(255,77,109,0.5)':'0 0 16px rgba(6,214,160,0.4)' }}>
@@ -889,7 +1058,7 @@ function App() {
       {camReady&&(
         <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.93)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',zIndex:300,gap:14 }}>
           <div style={{ color:countdown!==null?'#4CC9F0':'#FF4D6D',fontWeight:800,fontSize:14,letterSpacing:2 }}>
-            {countdown!==null ? '녹화 준비...' : (currentRecType==='audio'?'🎙 녹음 중':'🔴 녹화 중')}
+            {countdown!==null ? (currentRecType==='audio'?'녹음 준비...':'녹화 준비...') : (currentRecType==='audio'?'🎙 녹음 중':'🔴 녹화 중')}
           </div>
 
           {/* Video preview (video mode only) */}
@@ -947,6 +1116,7 @@ function App() {
         </div>
       )}
 
+      <ConfigPanel open={showConfig} onClose={()=>setShowConfig(false)} onSave={handleSaveConfig} onLoad={handleLoadConfig} onDeleteCfg={handleDeleteConfig} />
       <HelpPanel open={showHelp} onClose={()=>setShowHelp(false)} />
       <Settings open={showSettings} onClose={()=>setShowSettings(false)} cfg={{cols,rows,maxRecMs,globalVolume,cameraFacing,defaultRecType}} set={setSetting} onReset={handleReset} />
       {editPad&&<EditModal pad={pads[editPad.idx]} onSave={saveEdit} onClose={()=>setEditPad(null)} />}
