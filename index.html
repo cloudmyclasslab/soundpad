@@ -674,7 +674,7 @@ function App() {
       const nr = k==='rows' ? v : rows;
       if (nc*nr < padsRef.current.length && padsRef.current.slice(nc*nr).some(p=>p)) {
         setConfirm({
-          msg:'버튼 수를 줄이면 범위 밖에 있는 패드의 녹화 내용이 영구 삭제됩니다. 계속하시겠습니까?',
+          msg:'버튼 수를 줄이면 범위 밖에 있는 패드의 녹화·녹음 내용이 삭제됩니다. 계속하시겠습니까?',
           onOk:() => { setConfirm(null); ({ cols:setCols, rows:setRows })[k](v); }
         });
         return;
