@@ -201,6 +201,59 @@ function EditModal({ pad, onSave, onClose }) {
 
 
 
+
+// ── ThumbPromptModal ─────────────────────────────────────────
+function ThumbPromptModal({ padIdx, currentThumb, onSave, onSkip }) {
+  const [thumb, setThumb] = useState(currentThumb);
+  const fileRef = useRef(null);
+
+  const onFileChange = e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    resizeImage(file, dataUrl => setThumb(dataUrl));
+    e.target.value = '';
+  };
+
+  return <>
+    <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',zIndex:500 }} />
+    <div style={{ position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',background:'#111128',borderRadius:20,padding:28,width:'min(320px,92vw)',zIndex:501,animation:'fadeIn 0.2s' }}>
+      <div style={{ color:'#fff',fontWeight:800,fontSize:15,marginBottom:6 }}>🖼 썸네일 설정</div>
+      <div style={{ color:'#666',fontSize:12,marginBottom:20 }}>녹음된 패드에 이미지를 추가할 수 있어요.</div>
+
+      {/* Preview */}
+      <div style={{ display:'flex',justifyContent:'center',marginBottom:20 }}>
+        <div style={{
+          width:100,height:100,borderRadius:16,flexShrink:0,
+          background: thumb ? `url(${thumb}) center/cover` : '#1a1a2e',
+          border:'1.5px solid #2a2a3e',
+          display:'flex',alignItems:'center',justifyContent:'center',fontSize:40,
+        }}>
+          {!thumb && '🎙'}
+        </div>
+      </div>
+
+      <button
+        onClick={() => fileRef.current?.click()}
+        style={{ display:'block',width:'100%',padding:'10px 0',borderRadius:10,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontWeight:600,cursor:'pointer',fontSize:13,marginBottom:10 }}
+      >📁 이미지 선택</button>
+
+      {thumb && thumb !== currentThumb && (
+        <button
+          onClick={() => setThumb(currentThumb)}
+          style={{ display:'block',width:'100%',padding:'8px 0',borderRadius:10,border:'none',background:'transparent',color:'#FF4D6D',fontWeight:600,cursor:'pointer',fontSize:12,marginBottom:10 }}
+        >↩ 기본 아이콘으로</button>
+      )}
+
+      <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }} onChange={onFileChange} />
+
+      <div style={{ display:'flex',gap:10,marginTop:4 }}>
+        <button onClick={onSkip} style={{ flex:1,padding:'11px 0',borderRadius:10,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontWeight:700,cursor:'pointer',fontSize:13 }}>건너뛰기</button>
+        <button onClick={() => onSave(thumb)} style={{ flex:1,padding:'11px 0',borderRadius:10,border:'none',background:'linear-gradient(135deg,#9B5DE5,#F72585)',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13 }}>저장</button>
+      </div>
+    </div>
+  </>;
+}
+
 // ── Config Panel ──────────────────────────────────────────────
 function ConfigPanel({ open, onClose, onSave, onLoad, onDeleteCfg }) {
   const dg = useRef({on:false,y0:0,dy:0});
@@ -521,6 +574,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp,     setShowHelp]     = useState(false);
   const [showConfig,   setShowConfig]   = useState(false);
+  const [thumbPrompt,  setThumbPrompt]  = useState(null); // {idx, pad}
   const [editPad,      setEditPad]      = useState(null);
   const [confirm,      setConfirm]      = useState(null);
   const [toast,        setToast]        = useState(null);
@@ -740,6 +794,22 @@ function App() {
     await dbPut('cfg_list', list.filter(c => c.id !== cfg.id));
   };
 
+
+  const handleThumbSave = (thumb) => {
+    const { idx, pad } = thumbPrompt;
+    setThumbPrompt(null);
+    const updated = { ...pad, thumb };
+    const np = [...padsRef.current]; np[idx] = updated;
+    padsRef.current = np; setPads([...np]);
+    autoSave(np);
+  };
+
+  const handleThumbSkip = () => {
+    const { pad } = thumbPrompt;
+    setThumbPrompt(null);
+    autoSave(padsRef.current);
+  };
+
   // ── Record ───────────────────────────────────────────────────
   const cancelRecordFlow = useCallback(() => {
     cancelledRef.current = true;
@@ -786,7 +856,12 @@ function App() {
       stream.getTracks().forEach(t=>t.stop()); streamRef.current = null;
       setCamReady(false); setCountdown(null); setRecIdx(null); setRecProg(0);
       clearInterval(progTimerRef.current);
-      autoSave(np);
+      if (recType === 'audio') {
+        // 음성 녹음 완료 후 썸네일 설정 여부 묻기
+        setThumbPrompt({ idx, pad: newPad });
+      } else {
+        autoSave(np);
+      }
     };
     mr.start(100); setRecIdx(idx);
     let elapsed = 0;
@@ -1117,6 +1192,7 @@ function App() {
       )}
 
       <ConfigPanel open={showConfig} onClose={()=>setShowConfig(false)} onSave={handleSaveConfig} onLoad={handleLoadConfig} onDeleteCfg={handleDeleteConfig} />
+      {thumbPrompt&&<ThumbPromptModal padIdx={thumbPrompt.idx} currentThumb={thumbPrompt.pad.thumb} onSave={handleThumbSave} onSkip={handleThumbSkip} />}
       <HelpPanel open={showHelp} onClose={()=>setShowHelp(false)} />
       <Settings open={showSettings} onClose={()=>setShowSettings(false)} cfg={{cols,rows,maxRecMs,globalVolume,cameraFacing,defaultRecType}} set={setSetting} onReset={handleReset} />
       {editPad&&<EditModal pad={pads[editPad.idx]} onSave={saveEdit} onClose={()=>setEditPad(null)} />}
