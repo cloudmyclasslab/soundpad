@@ -82,12 +82,14 @@ function resizeImage(file, cb) {
 }
 
 // ── Components ────────────────────────────────────────────────
-function PadVideo({ url, volume, onEnd }) {
+function PadVideo({ url, volume, onEnd, trimStart, trimEnd }) {
   const ref = useRef(null);
   useEffect(() => {
     const v = ref.current; if (!v) return;
     v.volume = Math.max(0, Math.min(1, volume));
+    if (trimStart) v.currentTime = trimStart;
     v.play().catch(console.error);
+    v.ontimeupdate = () => { if (trimEnd && v.currentTime >= trimEnd) { v.pause(); onEnd(); } };
     v.onended = onEnd;
   }, []);
   return <video ref={ref} src={url} playsInline style={{ position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',borderRadius:14,zIndex:1 }} />;
@@ -201,6 +203,186 @@ function EditModal({ pad, onSave, onClose }) {
 
 
 
+
+
+// ── FilePickerModal ───────────────────────────────────────────
+// "직접 녹화" vs "파일에서 불러오기" 선택
+function FilePickerModal({ recType, onRecord, onFile, onClose }) {
+  const fileRef = useRef(null);
+  const accept  = recType === 'audio' ? 'video/*,audio/*' : 'video/*';
+  const hint    = recType === 'audio'
+    ? '음성 파일(.mp3, .m4a 등)을 선택하거나\n영상 파일을 선택하면 소리만 추출합니다.\n(영상에서 소리 추출 시 5분 이내 권장)'
+    : '영상 파일(.mp4, .mov 등)을 선택하세요.\n파일 앱, 사진 보관함에서 불러올 수 있어요.';
+  return <>
+    <div onClick={onClose} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',zIndex:500 }} />
+    <div style={{ position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',background:'#111128',borderRadius:20,padding:28,width:'min(320px,92vw)',zIndex:501,animation:'fadeIn 0.2s' }}>
+      <div style={{ color:'#fff',fontWeight:800,fontSize:15,marginBottom:8 }}>
+        {recType==='audio' ? '🎙 음성 녹음' : '🎬 영상 녹화'}
+      </div>
+      <div style={{ color:'#555',fontSize:12,lineHeight:1.7,marginBottom:24,whiteSpace:'pre-line' }}>{hint}</div>
+      <div style={{ display:'flex',flexDirection:'column',gap:10 }}>
+        <button onClick={onRecord} style={{ padding:'13px 0',borderRadius:12,border:'none',background: recType==='audio'?'linear-gradient(135deg,#9B5DE5,#F72585)':'linear-gradient(135deg,#FF4D6D,#FF6B35)',color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer' }}>
+          {recType==='audio' ? '🎙 직접 녹음하기' : '🎬 직접 녹화하기'}
+        </button>
+        <button onClick={()=>fileRef.current?.click()} style={{ padding:'13px 0',borderRadius:12,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontWeight:700,fontSize:14,cursor:'pointer' }}>
+          📁 파일에서 불러오기
+        </button>
+      </div>
+      <input ref={fileRef} type="file" accept={accept} style={{ display:'none' }}
+        onChange={e=>{ const f=e.target.files?.[0]; if(f){ e.target.value=''; onFile(f); } }} />
+      <button onClick={onClose} style={{ width:'100%',marginTop:12,padding:'10px 0',borderRadius:10,border:'none',background:'transparent',color:'#555',fontSize:13,cursor:'pointer' }}>취소</button>
+    </div>
+  </>;
+}
+
+// ── TrimModal ──────────────────────────────────────────────────
+// 구간 선택 + 오디오 추출 / 영상 클립
+function TrimModal({ file, recType, padIdx, onDone, onClose }) {
+  const [duration,  setDuration]  = useState(0);
+  const [startSec,  setStartSec]  = useState(0);
+  const [endSec,    setEndSec]    = useState(0);
+  const [processing,setProcessing]= useState(false);
+  const [error,     setError]     = useState(null);
+  const [fileUrl,   setFileUrl]   = useState(null);
+  const vidRef = useRef(null);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    setFileUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  const onMeta = () => {
+    const v = vidRef.current;
+    if (!v) return;
+    const d = Math.min(v.duration, 600); // 최대 10분 표시
+    setDuration(d);
+    setEndSec(Math.min(d, 10)); // 기본 10초
+  };
+
+  const fmt = s => {
+    const m = Math.floor(s/60), sec = Math.floor(s%60);
+    return `${m}:${String(sec).padStart(2,'0')}`;
+  };
+
+  const handleConfirm = async () => {
+    if (endSec <= startSec) { setError('끝 지점이 시작 지점보다 커야 합니다.'); return; }
+    setProcessing(true); setError(null);
+    try {
+      if (recType === 'audio') {
+        // Web Audio API로 오디오만 추출
+        const arrayBuf = await file.arrayBuffer();
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const decoded = await ctx.decodeAudioData(arrayBuf);
+        const sampleRate = decoded.sampleRate;
+        const startSample = Math.floor(startSec * sampleRate);
+        const endSample   = Math.floor(endSec   * sampleRate);
+        const length = endSample - startSample;
+        const trimmed = ctx.createBuffer(decoded.numberOfChannels, length, sampleRate);
+        for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+          trimmed.copyToChannel(decoded.getChannelData(ch).slice(startSample, endSample), ch);
+        }
+        // Encode to WAV
+        const wav = audioBufferToWav(trimmed);
+        const blob = new Blob([wav], { type:'audio/wav' });
+        await ctx.close();
+        onDone(blob, 'audio');
+      } else {
+        // 영상은 blob 그대로, 구간 정보는 pad의 startSec/endSec으로 저장
+        const blob = file;
+        onDone(blob, 'video', startSec, endSec);
+      }
+    } catch(e) {
+      console.error(e);
+      setError('처리 중 오류가 발생했습니다. 파일을 확인해 주세요.');
+      setProcessing(false);
+    }
+  };
+
+  return <>
+    <div onClick={!processing ? onClose : null} style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',zIndex:510 }} />
+    <div style={{ position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',background:'#111128',borderRadius:20,padding:24,width:'min(360px,95vw)',zIndex:511,animation:'fadeIn 0.2s' }}>
+      <div style={{ color:'#fff',fontWeight:800,fontSize:15,marginBottom:16 }}>✂️ 구간 선택</div>
+
+      {/* 미리보기 */}
+      {fileUrl && (
+        <video ref={vidRef} src={fileUrl} controls playsInline muted={recType==='video'}
+          onLoadedMetadata={onMeta}
+          style={{ width:'100%',borderRadius:10,background:'#000',marginBottom:16,maxHeight:160,objectFit:'contain' }} />
+      )}
+
+      {duration > 0 && <>
+        {/* 안내 */}
+        <div style={{ color:'#555',fontSize:11,marginBottom:12,lineHeight:1.6 }}>
+          {recType==='audio'
+            ? '선택한 구간의 소리만 추출합니다.'
+            : '선택한 구간을 패드에 저장합니다. (재생 시 해당 구간만 재생됩니다)'}
+        </div>
+
+        {/* 시작 슬라이더 */}
+        <div style={{ marginBottom:14 }}>
+          <div style={{ display:'flex',justifyContent:'space-between',marginBottom:6 }}>
+            <span style={{ color:'#aaa',fontSize:12 }}>시작</span>
+            <span style={{ color:'#4CC9F0',fontSize:12,fontWeight:700 }}>{fmt(startSec)}</span>
+          </div>
+          <input type="range" min={0} max={duration} step={0.1} value={startSec}
+            onChange={e=>{ const v=+e.target.value; setStartSec(v); if(endSec<=v) setEndSec(Math.min(v+1, duration)); }} />
+        </div>
+
+        {/* 끝 슬라이더 */}
+        <div style={{ marginBottom:8 }}>
+          <div style={{ display:'flex',justifyContent:'space-between',marginBottom:6 }}>
+            <span style={{ color:'#aaa',fontSize:12 }}>끝</span>
+            <span style={{ color:'#FF6B35',fontSize:12,fontWeight:700 }}>{fmt(endSec)}</span>
+          </div>
+          <input type="range" min={0} max={duration} step={0.1} value={endSec}
+            onChange={e=>{ const v=+e.target.value; setEndSec(v); if(startSec>=v) setStartSec(Math.max(v-1, 0)); }} />
+        </div>
+
+        {/* 구간 길이 */}
+        <div style={{ textAlign:'center',color:'#555',fontSize:11,marginBottom:16 }}>
+          선택 구간: <span style={{ color:'#fff',fontWeight:700 }}>{fmt(endSec - startSec)}</span>
+        </div>
+      </>}
+
+      {error && <div style={{ color:'#FF4D6D',fontSize:12,marginBottom:12,textAlign:'center' }}>{error}</div>}
+
+      <div style={{ display:'flex',gap:10 }}>
+        <button onClick={onClose} disabled={processing} style={{ flex:1,padding:'11px 0',borderRadius:10,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontWeight:700,cursor:'pointer',fontSize:13 }}>취소</button>
+        <button onClick={handleConfirm} disabled={processing||duration===0} style={{ flex:1,padding:'11px 0',borderRadius:10,border:'none',background:'linear-gradient(135deg,#4CC9F0,#4361EE)',color:processing?'rgba(255,255,255,0.5)':'#fff',fontWeight:700,cursor:processing?'default':'pointer',fontSize:13 }}>
+          {processing ? '처리 중...' : '확인'}
+        </button>
+      </div>
+    </div>
+  </>;
+}
+
+// WAV encoder (PCM)
+function audioBufferToWav(buffer) {
+  const numCh = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const numSamples = buffer.length;
+  const bytesPerSample = 2;
+  const blockAlign = numCh * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = numSamples * blockAlign;
+  const ab = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(ab);
+  const str = (off, s) => { for(let i=0;i<s.length;i++) view.setUint8(off+i, s.charCodeAt(i)); };
+  str(0,'RIFF'); view.setUint32(4, 36+dataSize, true); str(8,'WAVE');
+  str(12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true);
+  view.setUint16(22,numCh,true); view.setUint32(24,sampleRate,true);
+  view.setUint32(28,byteRate,true); view.setUint16(32,blockAlign,true);
+  view.setUint16(34,bytesPerSample*8,true); str(36,'data'); view.setUint32(40,dataSize,true);
+  let off = 44;
+  for (let i=0;i<numSamples;i++) {
+    for (let ch=0;ch<numCh;ch++) {
+      const s = Math.max(-1,Math.min(1,buffer.getChannelData(ch)[i]));
+      view.setInt16(off, s<0?s*0x8000:s*0x7FFF, true); off+=2;
+    }
+  }
+  return ab;
+}
 
 // ── ThumbPromptModal ─────────────────────────────────────────
 function ThumbPromptModal({ padIdx, currentThumb, onSave, onSkip }) {
@@ -575,6 +757,8 @@ function App() {
   const [showHelp,     setShowHelp]     = useState(false);
   const [showConfig,   setShowConfig]   = useState(false);
   const [thumbPrompt,  setThumbPrompt]  = useState(null); // {idx, pad}
+  const [filePicker,   setFilePicker]   = useState(null); // {idx}
+  const [trimModal,    setTrimModal]    = useState(null); // {file, idx}
   const [editPad,      setEditPad]      = useState(null);
   const [confirm,      setConfirm]      = useState(null);
   const [toast,        setToast]        = useState(null);
@@ -952,6 +1136,55 @@ function App() {
     setEditPad(null);
   };
 
+
+  // ── File import ──────────────────────────────────────────────
+  const handleFileSelected = (file, idx) => {
+    setFilePicker(null);
+    setTrimModal({ file, idx });
+  };
+
+  const handleTrimDone = async (blob, type, startSec, endSec) => {
+    const { idx } = trimModal;
+    setTrimModal(null);
+    const recType = type === 'video' ? 'video' : 'audio';
+    const url = URL.createObjectURL(blob);
+    const old = padsRef.current[idx];
+    if (old?.url) URL.revokeObjectURL(old.url);
+
+    // Thumbnail
+    let thumb = null;
+    if (recType === 'video') {
+      // Capture frame from video
+      await new Promise(resolve => {
+        const v = document.createElement('video');
+        v.src = url; v.muted = true; v.preload = 'metadata';
+        v.onloadedmetadata = () => { v.currentTime = startSec !== undefined ? startSec + (endSec - startSec) / 2 : 0.5; };
+        v.onseeked = () => {
+          try {
+            const c = document.createElement('canvas');
+            c.width = v.videoWidth||320; c.height = v.videoHeight||240;
+            c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+            thumb = c.toDataURL('image/jpeg', 0.85);
+          } catch {}
+          v.src = ''; resolve();
+        };
+        v.onerror = resolve;
+      });
+    }
+
+    const newPad = { url, thumb, label:old?.label||'', volume:old?.volume??1, recType,
+      ...(startSec !== undefined ? { trimStart:startSec, trimEnd:endSec } : {}) };
+    const np = [...padsRef.current]; np[idx] = newPad;
+    padsRef.current = np; setPads([...np]);
+
+    if (recType === 'audio') {
+      setThumbPrompt({ idx, pad: newPad });
+    } else {
+      autoSave(np);
+      showToast('✅ 파일을 불러왔습니다');
+    }
+  };
+
   // ── Drag & Drop ───────────────────────────────────────────────
   const handleGlobalMove = e => {
     if (dragActiveRef.current) {
@@ -991,9 +1224,9 @@ function App() {
       clearTimeout(pressRef.current.timer); pressRef.current = null;
       if (recIdx !== null) return;
       if (padsRef.current[idx]) {
-        setConfirm({ msg: defRecTypeRef.current==='audio' ? '패드를 다시 녹음할까요?\n기존 녹음이 삭제됩니다.' : '패드를 다시 녹화할까요?\n기존 녹화가 삭제됩니다.', onOk:()=>{ setConfirm(null); startRecordFlow(idx); } });
+        setConfirm({ msg: defRecTypeRef.current==='audio' ? '패드를 다시 녹음할까요?\n기존 녹음이 삭제됩니다.' : '패드를 다시 녹화할까요?\n기존 녹화가 삭제됩니다.', onOk:()=>{ setConfirm(null); setFilePicker({idx}); } });
       } else {
-        startRecordFlow(idx);
+        setFilePicker({idx});
       }
     }
   };
@@ -1068,7 +1301,7 @@ function App() {
               {pad&&isPlay&&(
                 isAudio
                   ? <PadAudio key={playKey} url={pad.url} volume={vol} onEnd={()=>stopPad(i)} />
-                  : <PadVideo key={playKey} url={pad.url} volume={vol} onEnd={()=>stopPad(i)} />
+                  : <PadVideo key={playKey} url={pad.url} volume={vol} onEnd={()=>stopPad(i)} trimStart={pad.trimStart} trimEnd={pad.trimEnd} />
               )}
 
               {/* Play glow */}
@@ -1192,6 +1425,8 @@ function App() {
       )}
 
       <ConfigPanel open={showConfig} onClose={()=>setShowConfig(false)} onSave={handleSaveConfig} onLoad={handleLoadConfig} onDeleteCfg={handleDeleteConfig} />
+      {filePicker&&<FilePickerModal recType={defaultRecType} onRecord={()=>{ setFilePicker(null); startRecordFlow(filePicker.idx); }} onFile={f=>handleFileSelected(f, filePicker.idx)} onClose={()=>setFilePicker(null)} />}
+      {trimModal&&<TrimModal file={trimModal.file} recType={defaultRecType} padIdx={trimModal.idx} onDone={handleTrimDone} onClose={()=>setTrimModal(null)} />}
       {thumbPrompt&&<ThumbPromptModal padIdx={thumbPrompt.idx} currentThumb={thumbPrompt.pad.thumb} onSave={handleThumbSave} onSkip={handleThumbSkip} />}
       <HelpPanel open={showHelp} onClose={()=>setShowHelp(false)} />
       <Settings open={showSettings} onClose={()=>setShowSettings(false)} cfg={{cols,rows,maxRecMs,globalVolume,cameraFacing,defaultRecType}} set={setSetting} onReset={handleReset} />
