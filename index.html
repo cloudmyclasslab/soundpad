@@ -282,7 +282,7 @@ function TrimModal({ file, recType, padIdx, maxRecMs, onDone, onClose }) {
           decoded = await ctx.decodeAudioData(arrayBuf);
         } catch(decodeErr) {
           await ctx.close();
-          setError('이 파일 형식은 소리 추출을 지원하지 않습니다.\n음성 파일(.mp3, .m4a)을 직접 선택해 주세요.');
+          setError('이 파일 형식은 소리 추출을 지원하지 않습니다.');
           setProcessing(false);
           return;
         }
