@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  마이클래스 패드 Beta
+  MyClass Pad Beta
   Copyright (c) 2025 myclasslab. All rights reserved.
   본 소프트웨어의 무단 복제, 배포, 수정을 금합니다.
   Unauthorized copying, distribution, or modification of this software is prohibited.
@@ -9,7 +9,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>마이클래스 패드 Beta</title>
+<title>MyClass Pad Beta</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -418,6 +418,48 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
     </div>
   );
 }
+// ── GazeAutoRecalib ───────────────────────────────────────────
+// 저장된 캘리브레이션 불러온 후 가운데 1포인트 빠른 보정
+function GazeAutoRecalib({ onDone }) {
+  const [count, setCount] = React.useState(3);
+  React.useEffect(() => {
+    if (count <= 0) {
+      const x = window.innerWidth  / 2;
+      const y = window.innerHeight / 2;
+      for (let k = 0; k < 8; k++) {
+        try { window.webgazer?.recordScreenPosition(x, y, 'click'); } catch {}
+      }
+      onDone();
+      return;
+    }
+    const t = setTimeout(() => setCount(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [count]);
+
+  const filled = (3 - count) / 3;
+  const R = 38, C = 2 * Math.PI * R;
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',zIndex:850,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16,touchAction:'none'}}>
+      <div style={{color:'#fff',fontWeight:800,fontSize:17}}>👁️ 시선 위치 보정 중</div>
+      <div style={{color:'#aaa',fontSize:13}}>화면 중앙을 바라봐 주세요</div>
+      <div style={{position:'relative',width:100,height:100,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <div style={{position:'absolute',width:90,height:90,borderRadius:'50%',border:'2px solid rgba(76,201,240,0.3)',animation:'pulse 1s ease-in-out infinite'}} />
+        <svg style={{position:'absolute',inset:0,width:'100%',height:'100%'}} viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r={R} fill="none" stroke="rgba(76,201,240,0.2)" strokeWidth="5"/>
+          <circle cx="50" cy="50" r={R} fill="none" stroke="#4CC9F0" strokeWidth="5"
+            strokeDasharray={`${C*filled} ${C*(1-filled)}`}
+            strokeLinecap="round" transform="rotate(-90 50 50)"
+            style={{transition:'stroke-dasharray 0.9s linear'}}/>
+        </svg>
+        <div style={{width:20,height:20,borderRadius:'50%',background:'#4CC9F0',boxShadow:'0 0 16px #4CC9F0'}} />
+      </div>
+      <div style={{color:'#4CC9F0',fontSize:32,fontWeight:900,minHeight:40}}>{count > 0 ? count : '✓'}</div>
+      <button onPointerDown={onDone} style={{marginTop:4,padding:'8px 24px',borderRadius:50,border:'1px solid #333',background:'transparent',color:'#555',fontSize:12,cursor:'pointer'}}>건너뛰기</button>
+    </div>
+  );
+}
+
 function GazeLoadingScreen({ onCancel }) {
   const [dots, setDots] = React.useState('');
   React.useEffect(() => {
@@ -1221,8 +1263,9 @@ function App() {
   // Gaze tracking state
   const [gazeMode,       setGazeMode]       = useState(false);
   const [gazeCalib,      setGazeCalib]      = useState(false);
-  const [gazeLoading,    setGazeLoading]    = useState(false); // begin() 후 첫 data 대기
+  const [gazeLoading,    setGazeLoading]    = useState(false);
   const [gazeStartModal, setGazeStartModal] = useState(null);
+  const [gazeAutoRecalib,setGazeAutoRecalib]= useState(false);
   const gazeModeRef    = useRef(false);
   const gazeHoverRef   = useRef({idx:null, timerId:null, lastPlayIdx:null, exitCount:0, dwellAttempts:0, dwellSuccesses:0});
   const padRectsRef    = useRef([]);
@@ -1883,20 +1926,18 @@ function App() {
       setGazeLoading(true);
       await startGazeEngine(() => {
         setGazeLoading(false);
-        // 저장된 포인트 재주입
+        // 저장된 포인트 재주입 후 가운데 빠른 보정 표시
         setTimeout(() => {
           applyCalibPoints(saved.points, saved.screenW, saved.screenH, saved.orientation);
-          setGazeMode(true);
-          gazeModeRef.current = true;
-          setTimeout(updatePadRects, 150);
-          showToast('✅ 캘리브레이션 불러왔습니다');
+          // 포인트 주입 후 가운데 보정 오버레이 표시
+          setGazeAutoRecalib(true);
         }, 800);
       });
     } catch(e) {
       setGazeLoading(false);
       alert('시작 오류: ' + e.message);
     }
-  }, [gazeStartModal, startGazeEngine, applyCalibPoints, updatePadRects]);
+  }, [gazeStartModal, startGazeEngine, applyCalibPoints]);
 
   const handleGazeNewCalib = useCallback(async () => {
     setGazeStartModal(null);
@@ -2088,7 +2129,7 @@ function App() {
       <div ref={headerRef} style={{ width:'100%',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 0 12px',gap:8,flexShrink:0 }}>
         <div>
           <div style={{ color:'#fff',fontSize:18,fontWeight:800,letterSpacing:-0.5 }}>
-            🎓 마이클래스 패드 <span style={{ fontSize:11,color:'#4CC9F0',fontWeight:700,verticalAlign:'middle' }}>Beta</span>
+            🎓 MyClass Pad <span style={{ fontSize:11,color:'#4CC9F0',fontWeight:700,verticalAlign:'middle' }}>Beta</span>
           </div>
           <div style={{ color:'#555',fontSize:10,marginTop:2 }}>
             {mode==='record' ? (dragFrom!==null ? '놓을 위치로 이동' : `탭: ${defaultRecType==='audio'?'🎙 녹음':'🎬 녹화'} | 꾹: 순서 변경`) : '패드를 눌러 재생'}
@@ -2287,6 +2328,14 @@ function App() {
       {gazeStartModal&&<GazeStartModal savedAt={gazeStartModal.savedAt} screenW={gazeStartModal.screenW} screenH={gazeStartModal.screenH} orientation={gazeStartModal.orientation} onNew={handleGazeNewCalib} onLoad={handleGazeLoadSaved} onDelete={handleGazeDeleteSaved} onCancel={()=>setGazeStartModal(null)} />}
       {gazeLoading&&<GazeLoadingScreen onCancel={stopGaze} />}
       {gazeCalib&&<CalibrationScreen onDone={handleGazeCalibDone} onCancel={stopGaze} onCalibClick={(x,y)=>{ calibPtsRef.current.push([x,y]); }} />}
+      {gazeAutoRecalib&&<GazeAutoRecalib onDone={()=>{
+        setGazeAutoRecalib(false);
+        setGazeMode(true);
+        gazeModeRef.current = true;
+        gazeStartTimeRef.current = Date.now();
+        setTimeout(updatePadRects, 150);
+        showToast('✅ 보정 완료');
+      }} />}
     </div>
   );
 }
