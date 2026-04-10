@@ -218,7 +218,7 @@ const ACCURACY_THRESHOLD = 120;
 const EMOJIS_BY_CELL = ['⭐','🌟','✨','🎯','🌈','🎪','💫','🔥','🎨'];
 
 function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
-  const [phase,    setPhase]    = React.useState('countdown');
+  const [phase,    setPhase]    = React.useState('intro');
   const [cur,      setCur]      = React.useState(0);
   const [maxPts,   setMaxPts]   = React.useState(5);
   const [ready,    setReady]    = React.useState(3);
@@ -293,6 +293,13 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
     }, 1500);
   }, [onDone, maxPts]);
 
+  // 인트로
+  React.useEffect(() => {
+    if (phase !== 'intro') return;
+    const t = setTimeout(() => setPhase('countdown'), 1200);
+    return () => clearTimeout(t);
+  }, [phase]);
+
   // 카운트다운
   React.useEffect(() => {
     if (phase !== 'countdown') return;
@@ -335,6 +342,7 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
           {phase==='verifying' ? '🔍 정확도 확인 중...' : '👁️ 시선 캘리브레이션'}
         </div>
         <div style={{color:'#aaa',fontSize:13,marginTop:4}}>
+          {phase==='intro'     && <span style={{animation:'fadeIn 0.4s ease-out'}}>화면을 바라보며 준비하세요</span>}
           {phase==='countdown' && '준비하세요 — 곧 자동으로 시작됩니다'}
           {phase==='calibrating' && <>
             <span style={{color:'#FFD60A',fontWeight:700}}>빛나는 패드</span>를 바라보세요
@@ -421,15 +429,20 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
 // ── GazeAutoRecalib ───────────────────────────────────────────
 // 저장된 캘리브레이션 불러온 후 가운데 1포인트 빠른 보정
 function GazeAutoRecalib({ onDone }) {
-  const HOLD_MS = 3000;
+  const INTRO_MS = 900, HOLD_MS = 3000;
+  const [phase,    setPhase]    = React.useState('intro');
   const [progress, setProgress] = React.useState(0);
-  const rafRef   = React.useRef(null);
-  const startRef = React.useRef(null);
+  const rafRef = React.useRef(null);
 
   React.useEffect(() => {
-    startRef.current = performance.now();
+    if (phase === 'intro') {
+      const t = setTimeout(() => setPhase('calibrating'), INTRO_MS);
+      return () => clearTimeout(t);
+    }
+    // calibrating
+    const start = performance.now();
     const animate = (now) => {
-      const p = Math.min((now - startRef.current) / HOLD_MS, 1);
+      const p = Math.min((now - start) / HOLD_MS, 1);
       setProgress(p);
       if (p < 1) { rafRef.current = requestAnimationFrame(animate); }
       else {
@@ -443,31 +456,35 @@ function GazeAutoRecalib({ onDone }) {
     };
     rafRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(rafRef.current);
-  }, []);
+  }, [phase]);
 
-
-
+  const SIZE = 90, R = 36, C = 2 * Math.PI * R;
+  const dash = C * (1 - progress);
   return (
-    <div style={{position:'fixed',inset:0,background:'#000',zIndex:850,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20,touchAction:'none'}}>
-      <div style={{color:'#aaa',fontSize:13,letterSpacing:1}}>화면 중앙을 바라봐 주세요</div>
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.68)',zIndex:850,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16,touchAction:'none'}}>
+      {/* 텍스트: 항상 표시 */}
+      <div style={{color:'#fff',fontWeight:800,fontSize:16,animation:'fadeIn 0.4s ease-out'}}>👁️ 화면 중앙을 바라봐 주세요</div>
+      <div style={{color:'#aaa',fontSize:13}}>1 / 1</div>
 
-      {/* 고정 파란 원 + 안쪽 작은 점 바운스 */}
-      <div style={{
-        width:80, height:80, borderRadius:'50%',
-        background:'rgba(76,201,240,0.15)',
-        border:'2px solid rgba(76,201,240,0.4)',
-        display:'flex', alignItems:'center', justifyContent:'center',
-        boxShadow:'0 0 40px rgba(76,201,240,0.3)',
-      }}>
-        <div style={{
-          width:18, height:18, borderRadius:'50%',
-          background:'#4CC9F0',
-          boxShadow:'0 0 20px rgba(76,201,240,1), 0 0 40px rgba(76,201,240,0.5)',
-          animation:'pulse 0.8s ease-in-out infinite',
-        }} />
-      </div>
+      {/* 링: calibrating 단계에서만 표시 */}
+      {phase === 'calibrating' && (
+        <div style={{position:'relative',width:SIZE,height:SIZE,animation:'fadeIn 0.3s ease-out'}}>
+          <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
+            <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="rgba(255,214,10,0.2)" strokeWidth="6"/>
+            <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="#FFD60A" strokeWidth="6"
+              strokeDasharray={`${C - dash} ${dash}`}
+              strokeLinecap="round"
+              transform={`rotate(-90 ${SIZE/2} ${SIZE/2})`}
+              style={{transition:'stroke-dasharray 0.05s linear'}}
+            />
+          </svg>
+          <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <div style={{width:14,height:14,borderRadius:'50%',background:'#FFD60A',boxShadow:'0 0 18px rgba(255,214,10,1)',animation:'pulse 0.8s ease-in-out infinite'}} />
+          </div>
+        </div>
+      )}
 
-      <button onPointerDown={onDone} style={{padding:'7px 24px',borderRadius:50,border:'1px solid #222',background:'transparent',color:'#333',fontSize:11,cursor:'pointer'}}>건너뛰기</button>
+      <button onPointerDown={onDone} style={{marginTop:8,padding:'7px 24px',borderRadius:50,border:'1px solid #333',background:'transparent',color:'#444',fontSize:11,cursor:'pointer'}}>건너뛰기</button>
     </div>
   );
 }
@@ -475,16 +492,28 @@ function GazeAutoRecalib({ onDone }) {
 // ── GazePadRecalib ────────────────────────────────────────────
 // 저장된 캘리브레이션 불러온 후 패드 위치 n개를 순서대로 보정
 function GazePadRecalib({ padRects, onDone }) {
-  const [cur, setCur] = React.useState(0);
+  const [cur,      setCur]      = React.useState(0);
+  const [phase,    setPhase]    = React.useState('intro'); // 'intro' | 'calibrating'
   const [progress, setProgress] = React.useState(0);
-  const HOLD_MS = 2500;
+  const INTRO_MS = 700, HOLD_MS = 2500;
   const SIZE = 90, R = 36, C = 2 * Math.PI * R;
 
+  // cur 바뀔 때마다 intro 리셋
   React.useEffect(() => {
     if (!padRects.length || cur >= padRects.length) { onDone(); return; }
+    setPhase('intro');
     setProgress(0);
-    const start = performance.now();
+  }, [cur]);
+
+  React.useEffect(() => {
+    if (!padRects.length || cur >= padRects.length) return;
+    if (phase === 'intro') {
+      const t = setTimeout(() => setPhase('calibrating'), INTRO_MS);
+      return () => clearTimeout(t);
+    }
+    // calibrating
     let raf;
+    const start = performance.now();
     const animate = (now) => {
       const p = Math.min((now - start) / HOLD_MS, 1);
       setProgress(p);
@@ -501,7 +530,7 @@ function GazePadRecalib({ padRects, onDone }) {
     };
     raf = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(raf);
-  }, [cur, padRects.length]);
+  }, [phase, cur]);
 
   if (!padRects.length || cur >= padRects.length) return null;
 
@@ -512,48 +541,48 @@ function GazePadRecalib({ padRects, onDone }) {
 
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.68)',zIndex:850,touchAction:'none'}}>
-      {/* 안내 텍스트 */}
-      <div style={{position:'absolute',top:24,left:0,right:0,textAlign:'center',pointerEvents:'none'}}>
+      {/* 안내 텍스트: 항상 표시 */}
+      <div style={{position:'absolute',top:24,left:0,right:0,textAlign:'center',pointerEvents:'none',animation:'fadeIn 0.4s ease-out'}}>
         <div style={{color:'#fff',fontWeight:800,fontSize:16}}>👁️ 패드를 바라봐 주세요</div>
         <div style={{color:'#aaa',fontSize:13,marginTop:4}}>{cur + 1} / {padRects.length}</div>
       </div>
 
-      {/* 대상 패드 하이라이트 테두리 */}
-      <div style={{
-        position:'absolute',
-        left: r.left - 4, top: r.top - 4,
-        width: r.right - r.left + 8, height: r.bottom - r.top + 8,
-        border:'3px solid #FFD60A',
-        borderRadius:18,
-        boxShadow:'0 0 32px rgba(255,214,10,0.55)',
-        pointerEvents:'none',
-      }} />
+      {/* 하이라이트 + 링: calibrating 단계에서만 표시 */}
+      {phase === 'calibrating' && (<>
+        {/* 대상 패드 하이라이트 테두리 */}
+        <div style={{
+          position:'absolute',
+          left: r.left - 4, top: r.top - 4,
+          width: r.right - r.left + 8, height: r.bottom - r.top + 8,
+          border:'3px solid #FFD60A',
+          borderRadius:18,
+          boxShadow:'0 0 32px rgba(255,214,10,0.55)',
+          pointerEvents:'none',
+          animation:'fadeIn 0.3s ease-out',
+        }} />
 
-      {/* 중앙 원형 프로그레스 */}
-      <div style={{
-        position:'absolute',
-        left: cx - SIZE/2, top: cy - SIZE/2,
-        width: SIZE, height: SIZE,
-        pointerEvents:'none',
-      }}>
-        <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
-          <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="rgba(255,214,10,0.2)" strokeWidth="6"/>
-          <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="#FFD60A" strokeWidth="6"
-            strokeDasharray={`${C - dash} ${dash}`}
-            strokeLinecap="round"
-            transform={`rotate(-90 ${SIZE/2} ${SIZE/2})`}
-            style={{transition:'stroke-dasharray 0.05s linear'}}
-          />
-        </svg>
-        <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
-          <div style={{
-            width:14, height:14, borderRadius:'50%',
-            background:'#FFD60A',
-            boxShadow:'0 0 18px rgba(255,214,10,1)',
-            animation:'pulse 0.8s ease-in-out infinite',
-          }} />
+        {/* 중앙 원형 프로그레스 */}
+        <div style={{
+          position:'absolute',
+          left: cx - SIZE/2, top: cy - SIZE/2,
+          width: SIZE, height: SIZE,
+          pointerEvents:'none',
+          animation:'fadeIn 0.3s ease-out',
+        }}>
+          <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
+            <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="rgba(255,214,10,0.2)" strokeWidth="6"/>
+            <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="#FFD60A" strokeWidth="6"
+              strokeDasharray={`${C - dash} ${dash}`}
+              strokeLinecap="round"
+              transform={`rotate(-90 ${SIZE/2} ${SIZE/2})`}
+              style={{transition:'stroke-dasharray 0.05s linear'}}
+            />
+          </svg>
+          <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <div style={{width:14,height:14,borderRadius:'50%',background:'#FFD60A',boxShadow:'0 0 18px rgba(255,214,10,1)',animation:'pulse 0.8s ease-in-out infinite'}} />
+          </div>
         </div>
-      </div>
+      </>)}
 
       <button onPointerDown={onDone} style={{
         position:'absolute', bottom:32, left:'50%', transform:'translateX(-50%)',
