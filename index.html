@@ -451,23 +451,24 @@ function GazeAutoRecalib({ onDone }) {
     <div style={{position:'fixed',inset:0,background:'#000',zIndex:850,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20,touchAction:'none'}}>
       <div style={{color:'#aaa',fontSize:13,letterSpacing:1}}>화면 중앙을 바라봐 주세요</div>
 
-      {/* 원형 게이지 + 바운스 이모지 */}
+      {/* 원형 게이지 + 파란 바운스 원 */}
       <div style={{
         position:'relative', width:160, height:160,
         display:'flex', alignItems:'center', justifyContent:'center',
       }}>
         <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 160 160">
-          <circle cx="80" cy="80" r={R} fill="none" stroke="rgba(255,214,10,0.15)" strokeWidth="7"/>
-          <circle cx="80" cy="80" r={R} fill="none" stroke="#FFD60A" strokeWidth="7"
+          <circle cx="80" cy="80" r={R} fill="none" stroke="rgba(76,201,240,0.15)" strokeWidth="7"/>
+          <circle cx="80" cy="80" r={R} fill="none" stroke="#4CC9F0" strokeWidth="7"
             strokeDasharray={`${C*progress} ${C*(1-progress)}`}
             strokeLinecap="round" transform="rotate(-90 80 80)"
             style={{transition:'stroke-dasharray 0.05s linear'}}/>
         </svg>
-        <span style={{
-          fontSize:64, lineHeight:1, position:'relative', zIndex:1,
-          filter:'drop-shadow(0 0 14px rgba(255,214,10,0.9))',
+        <div style={{
+          width:36, height:36, borderRadius:'50%',
+          background:'#4CC9F0',
+          boxShadow:'0 0 24px rgba(76,201,240,0.9)',
           animation:'pulse 0.7s ease-in-out infinite',
-        }}>🎯</span>
+        }} />
       </div>
 
       <button onPointerDown={onDone} style={{padding:'7px 24px',borderRadius:50,border:'1px solid #222',background:'transparent',color:'#333',fontSize:11,cursor:'pointer'}}>건너뛰기</button>
