@@ -1700,6 +1700,7 @@ function App() {
     setGazeMode(true);
     gazeModeRef.current = true;
     gazeStartTimeRef.current = Date.now();
+    sessionStorage.setItem('gazeCalibrated', '1'); // 새로고침 후 재사용
     // 캘리브레이션 포인트 DB 저장
     try {
       await dbPut('gaze_calibration', {
@@ -1909,7 +1910,7 @@ function App() {
   }, [hideWebgazerEls]);
 
   const startGaze = useCallback(async () => {
-    if (gazeLoading || gazeMode) return; // 중복 실행 방지
+    if (gazeLoading || gazeMode) return;
     if (!window.webgazer) {
       if (window._webgazerLoadFailed) {
         alert('WebGazer 스크립트 로드에 실패했습니다.\n인터넷 연결을 확인하거나 페이지를 새로고침해 주세요.');
@@ -1919,11 +1920,16 @@ function App() {
       return;
     }
     try {
-      // 저장된 캘리브레이션 확인
-      const saved = await dbGet('gaze_calibration');
-      if (saved?.points?.length) {
-        setGazeStartModal(saved);
+      const prevCalibrated = sessionStorage.getItem('gazeCalibrated');
+      if (prevCalibrated) {
+        // 새로고침 후 재시작 → 가운데 보정만
+        setGazeLoading(true);
+        await startGazeEngine(() => {
+          setGazeLoading(false);
+          setGazeAutoRecalib(true);
+        });
       } else {
+        // 첫 시작 또는 새 세션 → 전체 캘리브레이션
         calibPtsRef.current = [];
         setGazeLoading(true);
         await startGazeEngine(() => {
@@ -1932,6 +1938,7 @@ function App() {
         });
       }
     } catch(e) {
+      setGazeLoading(false);
       console.error(e);
       alert('카메라 권한이 필요합니다: ' + e.message);
     }
@@ -1978,6 +1985,7 @@ function App() {
     gazeModeRef.current = true;
     gazeCalibRef.current = false;
     gazeStartTimeRef.current = Date.now();
+    sessionStorage.setItem('gazeCalibrated', '1');
     // 현재 패드 위치에 보정 포인트 등록
     setTimeout(() => {
       updatePadRects();
@@ -2367,7 +2375,6 @@ function App() {
       {editPad&&<EditModal pad={pads[editPad.idx]} onSave={saveEdit} onClose={()=>setEditPad(null)} />}
       {confirm&&<Confirm msg={confirm.msg} onOk={confirm.onOk} onCancel={()=>setConfirm(null)} />}
       {toast&&<Toast msg={toast} />}
-      {gazeStartModal&&<GazeStartModal savedAt={gazeStartModal.savedAt} screenW={gazeStartModal.screenW} screenH={gazeStartModal.screenH} orientation={gazeStartModal.orientation} onNew={handleGazeNewCalib} onLoad={handleGazeLoadSaved} onDelete={handleGazeDeleteSaved} onCancel={()=>setGazeStartModal(null)} />}
       {gazeLoading&&<GazeLoadingScreen onCancel={stopGaze} />}
       {gazeCalib&&<CalibrationScreen onDone={handleGazeCalibDone} onCancel={stopGaze} onCalibClick={(x,y)=>{ calibPtsRef.current.push([x,y]); }} />}
       {gazeAutoRecalib&&<GazeAutoRecalib onDone={handleAutoRecalibDone} />}
