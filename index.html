@@ -418,47 +418,6 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
     </div>
   );
 }
-// ── GazeAutoRecalib ───────────────────────────────────────────
-// 화면 복귀 후 1포인트 자동 보정 오버레이
-function GazeAutoRecalib({ onDone }) {
-  const [count, setCount] = React.useState(3);
-  React.useEffect(() => {
-    if (count <= 0) {
-      // 화면 중앙 기록
-      const x = window.innerWidth  / 2;
-      const y = window.innerHeight / 2;
-      for (let k = 0; k < 5; k++) {
-        try { window.webgazer?.recordScreenPosition(x, y, 'click'); } catch {}
-      }
-      onDone();
-      return;
-    }
-    const t = setTimeout(() => setCount(c => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [count]);
-
-  return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.82)',zIndex:850,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20,touchAction:'none'}}>
-      <div style={{color:'#fff',fontWeight:800,fontSize:17}}>👁️ 시선 자동 조정 중</div>
-      <div style={{color:'#aaa',fontSize:13}}>화면 중앙을 바라봐 주세요</div>
-      {/* 중앙 포인트 */}
-      <div style={{position:'relative',width:90,height:90,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <div style={{width:90,height:90,borderRadius:'50%',border:'3px solid #4CC9F0',background:'rgba(76,201,240,0.12)',position:'absolute',animation:'pulse 0.8s ease-in-out infinite'}} />
-        <div style={{width:18,height:18,borderRadius:'50%',background:'#4CC9F0',boxShadow:'0 0 12px #4CC9F0'}} />
-        {/* 카운트다운 원 */}
-        <svg style={{position:'absolute',inset:0,width:'100%',height:'100%'}} viewBox="0 0 90 90">
-          <circle cx="45" cy="45" r="40" fill="none" stroke="#4CC9F0" strokeWidth="3"
-            strokeDasharray={`${2*Math.PI*40*(3-count)/3} ${2*Math.PI*40}`}
-            strokeLinecap="round" transform="rotate(-90 45 45)"
-            style={{transition:'stroke-dasharray 0.9s linear'}}/>
-        </svg>
-      </div>
-      <div style={{color:'#4CC9F0',fontSize:28,fontWeight:900}}>{count}</div>
-      <button onPointerDown={onDone} style={{marginTop:8,padding:'8px 24px',borderRadius:50,border:'1px solid #333',background:'transparent',color:'#555',fontSize:12,cursor:'pointer'}}>건너뛰기</button>
-    </div>
-  );
-}
-
 function GazeLoadingScreen({ onCancel }) {
   const [dots, setDots] = React.useState('');
   React.useEffect(() => {
@@ -1273,14 +1232,14 @@ function App() {
   const calibPtsRef    = useRef([]);
   const modeRef        = useRef('play');
   const dwellMsRef     = useRef(1000);
-  const [gazeAutoRecalib, setGazeAutoRecalib] = useState(false); // 자동 보정 오버레이
-  const gazeQualityRef   = useRef({frames:0, misses:0});         // 품질 모니터
   const gazePrevRef      = useRef({x:null, y:null});       // saccade rejection
   const gazeVarianceRef  = useRef({samples:[], variance:0}); // adaptive dwell
   const gazeCornerRef    = useRef({corner:null, since:null, notified:false}); // quick recalib
   const gazeStartTimeRef = useRef(null);                   // auto-reminder
   const nystagmusModeRef = useRef(false);
-  const adaptiveDwellRef = useRef(1000);                   // 실시간 조정된 dwell
+  const adaptiveDwellRef = useRef(1000);
+  const gazeInitRef      = useRef(false); // webgazer.begin() 1회만 호출
+  const gazeStableRef    = useRef({idx:null, count:0});
 
   useEffect(() => { padsRef.current = pads; },               [pads]);
   useEffect(() => { colsRef.current = cols; },               [cols]);
@@ -1295,23 +1254,12 @@ function App() {
   useEffect(() => { playKeysRef.current = playKeys; }, [playKeys]);
   useEffect(() => { nystagmusModeRef.current = nystagmusMode; }, [nystagmusMode]);
 
-  // ── 화면 잠금 해제 후 자동 보정 ──────────────────────────────
+  // 화면 복귀 시 WebGazer resume
   useEffect(() => {
     const handle = () => {
       if (document.visibilityState !== 'visible' || !gazeModeRef.current) return;
       setTimeout(() => {
-        try {
-          window.webgazer?.resume?.();
-          hideWebgazerEls();
-          updatePadRects();
-          // 품질 모니터 리셋 후 자동 보정 오버레이 표시
-          gazeQualityRef.current = {frames:0, misses:0};
-          setGazeAutoRecalib(true);
-        } catch {
-          showToast('👁️ 시선 트래킹을 다시 시작해 주세요');
-          setGazeMode(false);
-          gazeModeRef.current = false;
-        }
+        try { window.webgazer?.resume?.(); hideWebgazerEls(); updatePadRects(); } catch {}
       }, 800);
     };
     document.addEventListener('visibilitychange', handle);
@@ -1669,9 +1617,6 @@ function App() {
 
   const stopGaze = useCallback(() => {
     try { window.webgazer?.pause(); } catch {}
-    try { window.webgazer?.clearData(); } catch {}
-    // end()로 완전 정리 - 재시작 시 begin() 재사용 가능
-    try { window.webgazer?.end(); } catch {}
     gazeObsRef.current?.disconnect();
     const dot = document.getElementById('gaze-dot');
     if (dot) dot.style.display = 'none';
@@ -1693,7 +1638,6 @@ function App() {
     setGazeMode(false);
     setGazeCalib(false);
     setGazeLoading(false);
-    setGazeAutoRecalib(false);
   }, []);
 
   const handleGazeCalibDone = useCallback(async () => {
@@ -1756,7 +1700,6 @@ function App() {
   }, []);
 
   const startGazeEngine = useCallback(async (onReady) => {
-    // MutationObserver로 WebGazer가 추가하는 video/canvas를 즉시 숨김
     if (gazeObsRef.current) gazeObsRef.current.disconnect();
     const obs = new MutationObserver(() => hideWebgazerEls());
     obs.observe(document.body, {childList:true, subtree:true, attributes:true, attributeFilter:['style']});
@@ -1771,213 +1714,131 @@ function App() {
         }
         if (!data) return;
 
-        // ── Saccade Rejection ─────────────────────────────
-        // 프레임 간 이동 거리가 너무 크면(눈 떨림) 무시
-        const SACCADE_THRESHOLD = nystagmusModeRef.current ? 350 : 220;
+        // Saccade Rejection
         const prev = gazePrevRef.current;
-        if (prev.x !== null) {
-          const dist = Math.hypot(data.x - prev.x, data.y - prev.y);
-          if (dist > SACCADE_THRESHOLD) {
-            gazePrevRef.current = {x: data.x, y: data.y};
-            return;
-          }
+        if (prev.x !== null && Math.hypot(data.x-prev.x, data.y-prev.y) > 250) {
+          gazePrevRef.current = {x:data.x, y:data.y}; return;
         }
-        gazePrevRef.current = {x: data.x, y: data.y};
+        gazePrevRef.current = {x:data.x, y:data.y};
 
-        // ── Adaptive Dwell ────────────────────────────────
-        // 최근 20프레임 시선 분산 → dwell 시간 자동 조정
-        const vr = gazeVarianceRef.current;
-        vr.samples.push({x: data.x, y: data.y});
-        if (vr.samples.length > 20) vr.samples.shift();
-        if (vr.samples.length >= 10) {
-          const mx = vr.samples.reduce((s,p)=>s+p.x,0)/vr.samples.length;
-          const my = vr.samples.reduce((s,p)=>s+p.y,0)/vr.samples.length;
-          vr.variance = vr.samples.reduce((s,p)=>s+Math.pow(p.x-mx,2)+Math.pow(p.y-my,2),0)/vr.samples.length;
-          const base = dwellMsRef.current;
-          // 분산 낮음(안정) → 빠르게, 높음(흔들림) → 느리게 (±40%)
-          const factor = nystagmusModeRef.current
-            ? Math.min(1.5, 0.8 + vr.variance / 3000)
-            : Math.min(1.4, 0.7 + vr.variance / 4000);
-          adaptiveDwellRef.current = Math.round(Math.max(300, Math.min(base * 1.5, base * factor)));
-        }
-
-        // ── Auto-reminder (10분 후) ───────────────────────
-        if (gazeStartTimeRef.current && (Date.now() - gazeStartTimeRef.current) > 10 * 60 * 1000) {
-          gazeStartTimeRef.current = null; // 한 번만
+        // Auto-reminder (10분)
+        if (gazeStartTimeRef.current && Date.now()-gazeStartTimeRef.current > 600000) {
+          gazeStartTimeRef.current = null;
           showToast('👁️ 캘리브레이션을 다시 하면 정확도가 올라갑니다');
         }
 
-        // ── 패드 감지 - 가장 가까운 패드 중심 선택 ──────────
+        // 패드 감지 - 가장 가까운 패드 선택
         const rects = padRectsRef.current;
         const nys = nystagmusModeRef.current;
-        let hovIdx = null;
-        let minDist = Infinity;
+        let hovIdx = null, minDist = Infinity;
         for (let i = 0; i < rects.length; i++) {
           const r = rects[i];
-          if (!r) continue;
-          // 재생 중인 패드는 dwell 대상에서 제외
-          if (playKeysRef.current[i]) continue;
-          const padW = r.right - r.left;
-          const padH = r.bottom - r.top;
-          const PAD_MARGIN = Math.round(Math.min(padW, padH) * (nys ? 0.25 : 0.15));
-          if (data.x >= r.left-PAD_MARGIN && data.x <= r.right+PAD_MARGIN &&
-              data.y >= r.top-PAD_MARGIN  && data.y <= r.bottom+PAD_MARGIN) {
-            // 겹침 시 중심 거리가 가장 가까운 패드 선택
-            const cx = (r.left + r.right) / 2;
-            const cy = (r.top  + r.bottom) / 2;
-            const dist = Math.hypot(data.x - cx, data.y - cy);
-            if (dist < minDist) { minDist = dist; hovIdx = i; }
+          if (!r || playKeysRef.current[i]) continue;
+          const m = Math.round(Math.min(r.right-r.left, r.bottom-r.top) * (nys?0.25:0.15));
+          if (data.x>=r.left-m && data.x<=r.right+m && data.y>=r.top-m && data.y<=r.bottom+m) {
+            const d = Math.hypot(data.x-(r.left+r.right)/2, data.y-(r.top+r.bottom)/2);
+            if (d < minDist) { minDist=d; hovIdx=i; }
           }
         }
 
-        // ── 품질 모니터 - 장시간 패드 미인식 시 자동 보정 제안 ──
-        const qr = gazeQualityRef.current;
-        qr.frames++;
-        if (hovIdx === null) qr.misses++;
-        // 60프레임(~2초) 중 55프레임 이상 미스 → 보정 제안
-        if (qr.frames >= 60) {
-          if (qr.misses >= 55 && gazeModeRef.current && !gazeCalibRef.current) {
-            setGazeAutoRecalib(true);
-          }
-          qr.frames = 0; qr.misses = 0; // 윈도우 리셋
-        }
+        // Quick Recalibration (코너 3초 응시)
         if (gazeModeRef.current && hovIdx === null) {
-          const W = window.innerWidth, H = window.innerHeight;
-          const CORNER_SIZE = 80;
+          const W=window.innerWidth, H=window.innerHeight, CS=80;
           let corner = null;
-          if (data.x < CORNER_SIZE && data.y < CORNER_SIZE) corner = 'TL';
-          else if (data.x > W-CORNER_SIZE && data.y < CORNER_SIZE) corner = 'TR';
-          else if (data.x < CORNER_SIZE && data.y > H-CORNER_SIZE) corner = 'BL';
-          else if (data.x > W-CORNER_SIZE && data.y > H-CORNER_SIZE) corner = 'BR';
-
+          if (data.x<CS && data.y<CS) corner='TL';
+          else if (data.x>W-CS && data.y<CS) corner='TR';
+          else if (data.x<CS && data.y>H-CS) corner='BL';
+          else if (data.x>W-CS && data.y>H-CS) corner='BR';
           const cr = gazeCornerRef.current;
           if (corner) {
-            if (cr.corner !== corner) { cr.corner = corner; cr.since = Date.now(); cr.notified = false; }
-            else if (!cr.notified && Date.now() - cr.since > 3000) {
-              cr.notified = true;
-              try { window.webgazer?.recordScreenPosition(data.x, data.y, 'click'); } catch {}
+            if (cr.corner!==corner) { cr.corner=corner; cr.since=Date.now(); cr.notified=false; }
+            else if (!cr.notified && Date.now()-cr.since>3000) {
+              cr.notified=true;
+              try { window.webgazer?.recordScreenPosition(data.x,data.y,'click'); } catch {}
               showToast('📍 코너 보정 완료');
             }
-          } else {
-            cr.corner = null; cr.since = null; cr.notified = false;
-          }
+          } else { cr.corner=null; cr.since=null; cr.notified=false; }
         }
 
-        // ── 안정화 필터 ───────────────────────────────────
+        // 안정화 필터 (4프레임)
         const stable = gazeStableRef.current;
-        const STABLE_FRAMES = nys ? 6 : 4;
-        if (hovIdx === stable.idx) {
-          stable.count = Math.min(stable.count + 1, 99);
-        } else {
-          stable.idx = hovIdx;
-          stable.count = 1;
-        }
-        const stableHovIdx = stable.count >= STABLE_FRAMES ? hovIdx : gazeHoverRef.current.idx;
+        const STABLE = nys ? 6 : 4;
+        if (hovIdx===stable.idx) stable.count=Math.min(stable.count+1,99);
+        else { stable.idx=hovIdx; stable.count=1; }
+        const stableIdx = stable.count>=STABLE ? hovIdx : gazeHoverRef.current.idx;
 
-        // dot: dwell 진행 중인 패드 중앙에만 표시
+        // dot 표시
         const dot = document.getElementById('gaze-dot');
         if (dot) {
-          const gh0 = gazeHoverRef.current;
-          if (stableHovIdx !== null && gh0.timerId !== null && !gazeCalibRef.current && modeRef.current === 'play') {
-            const r = rects[stableHovIdx];
-            dot.style.left = ((r.left + r.right) / 2) + 'px';
-            dot.style.top  = ((r.top + r.bottom) / 2) + 'px';
-            dot.style.display = 'block';
-          } else {
-            dot.style.display = 'none';
-          }
+          if (stableIdx!==null && gazeHoverRef.current.timerId!==null &&
+              !gazeCalibRef.current && modeRef.current==='play') {
+            const r=rects[stableIdx];
+            if (r) { dot.style.left=((r.left+r.right)/2)+'px'; dot.style.top=((r.top+r.bottom)/2)+'px'; dot.style.display='block'; }
+          } else { dot.style.display='none'; }
         }
 
         const resetArc = (id) => {
           const el = document.getElementById(`dwell-arc-${id}`);
-          if (el) {
-            el.style.transition = 'none';
-            el.style.transform = 'translate(-50%,-50%) scale(0)';
-            el.style.opacity = '0';
-          }
+          if (el) { el.style.transition='none'; el.style.transform='translate(-50%,-50%) scale(0)'; el.style.opacity='0'; }
         };
 
         if (!gazeModeRef.current) return;
         if (modeRef.current !== 'play') return;
 
         const gh = gazeHoverRef.current;
-        // 짧은 이탈 허용: dwell 진행 중 잠깐 패드 밖으로 나가도 유지
-        const EXIT_TOLERANCE = 6; // ~200ms (30fps 기준)
-        let effectiveIdx = stableHovIdx;
-        if (stableHovIdx === null && gh.idx !== null && gh.timerId !== null) {
-          gh.exitCount = (gh.exitCount || 0) + 1;
-          if (gh.exitCount <= EXIT_TOLERANCE) {
-            effectiveIdx = gh.idx; // 아직 허용 범위 → 현재 패드 유지
-          }
-        } else {
-          gh.exitCount = 0;
-        }
+        // 짧은 이탈 허용
+        let effectiveIdx = stableIdx;
+        if (stableIdx===null && gh.idx!==null && gh.timerId!==null) {
+          gh.exitCount = (gh.exitCount||0)+1;
+          if (gh.exitCount<=6) effectiveIdx=gh.idx;
+        } else { gh.exitCount=0; }
 
         if (effectiveIdx !== gh.idx) {
-          if (gh.idx !== null) {
-            resetArc(gh.idx);
-            // dwell 중간에 시선이 빠져나감 → 실패 (attempts는 이미 카운트됨)
-            // 실패율 체크: 10회 중 성공 2회 미만이면 자동 보정
-            if ((gh.dwellAttempts || 0) >= 10) {
-              const failRate = 1 - (gh.dwellSuccesses || 0) / gh.dwellAttempts;
-              if (failRate > 0.8) {
-                gh.dwellAttempts = 0; gh.dwellSuccesses = 0;
-                autoCorrectGaze(2, false); // weight 2 = 강한 보정
-              }
-            }
-          }
+          if (gh.idx!==null) resetArc(gh.idx);
           clearTimeout(gh.timerId);
-          if (effectiveIdx === null) gh.lastPlayIdx = null;
-          const blocked = (effectiveIdx !== null && effectiveIdx === gh.lastPlayIdx);
-          gh.idx = effectiveIdx; gh.timerId = null; gh.exitCount = 0;
-          if (effectiveIdx !== null && !blocked) {
-            const dwell = adaptiveDwellRef.current;
-            // dwell 시작 → attempt 카운트
-            gh.dwellAttempts = (gh.dwellAttempts || 0) + 1;
+          if (effectiveIdx===null) gh.lastPlayIdx=null;
+          const blocked = effectiveIdx!==null && effectiveIdx===gh.lastPlayIdx;
+          gh.idx=effectiveIdx; gh.timerId=null; gh.exitCount=0;
+          if (effectiveIdx!==null && !blocked) {
+            const dwell = dwellMsRef.current;
             const arc = document.getElementById(`dwell-arc-${effectiveIdx}`);
             if (arc) {
-              arc.style.transition = 'none';
-              arc.style.transform = 'translate(-50%,-50%) scale(1)';
-              arc.style.opacity = '0.85';
-              requestAnimationFrame(() => {
-                arc.style.transition = `transform ${dwell}ms linear, opacity ${dwell}ms linear`;
-                requestAnimationFrame(() => {
-                  arc.style.transform = 'translate(-50%,-50%) scale(0.08)';
-                  arc.style.opacity = '0.15';
-                });
+              arc.style.transition='none';
+              arc.style.transform='translate(-50%,-50%) scale(1)';
+              arc.style.opacity='0.85';
+              requestAnimationFrame(()=>{
+                arc.style.transition=`transform ${dwell}ms linear,opacity ${dwell}ms linear`;
+                requestAnimationFrame(()=>{ arc.style.transform='translate(-50%,-50%) scale(0.08)'; arc.style.opacity='0.15'; });
               });
             }
-            gh.timerId = setTimeout(() => {
+            gh.timerId = setTimeout(()=>{
               resetArc(effectiveIdx);
-              const padEl = document.querySelector(`[data-pi="${effectiveIdx}"]`);
-              if (padEl) {
-                padEl.style.filter = 'brightness(2.2)';
-                setTimeout(() => { padEl.style.filter = ''; }, 180);
-              }
-              // dwell 성공 카운트
-              gh.dwellSuccesses = (gh.dwellSuccesses || 0) + 1;
-              gh.lastPlayIdx = effectiveIdx;
-              gh.idx = null; gh.timerId = null; gh.exitCount = 0;
-              // 성공률 리셋 (10회마다)
-              if (gh.dwellAttempts >= 10) {
-                gh.dwellAttempts = 0; gh.dwellSuccesses = 0;
-              }
-              unlockAudioPool();
-              resumeAudioCtx();
+              const padEl=document.querySelector(`[data-pi="${effectiveIdx}"]`);
+              if (padEl) { padEl.style.filter='brightness(2.2)'; setTimeout(()=>{padEl.style.filter='';},180); }
+              gh.lastPlayIdx=effectiveIdx; gh.idx=null; gh.timerId=null; gh.exitCount=0;
+              unlockAudioPool(); resumeAudioCtx();
               playPad(effectiveIdx);
             }, dwell);
           }
         }
       });
-    await window.webgazer.begin();
+    if (!gazeInitRef.current) {
+      // 첫 실행: begin()
+      await window.webgazer.begin();
+      gazeInitRef.current = true;
+    } else {
+      // 재실행: resume()
+      try { window.webgazer.resume(); } catch {}
+    }
     hideWebgazerEls();
-    // gaze listener가 아예 호출 안 되는 경우 fallback (2초 후 강제 진행)
+    // gaze listener가 호출 안 되는 경우 fallback
     setTimeout(() => {
       if (firstData) { firstData = false; onReady?.(); }
     }, 2000);
   }, [hideWebgazerEls]);
 
   const startGaze = useCallback(async () => {
+    if (gazeLoading || gazeMode) return; // 중복 실행 방지
     if (!window.webgazer) {
       if (window._webgazerLoadFailed) {
         alert('WebGazer 스크립트 로드에 실패했습니다.\n인터넷 연결을 확인하거나 페이지를 새로고침해 주세요.');
@@ -2003,9 +1864,7 @@ function App() {
       console.error(e);
       alert('카메라 권한이 필요합니다: ' + e.message);
     }
-  }, [startGazeEngine]);
-
-  const handleGazeLoadSaved = useCallback(async () => {
+  }, [startGazeEngine, gazeLoading, gazeMode]); = useCallback(async () => {
     const saved = gazeStartModal;
     setGazeStartModal(null);
     try {
@@ -2227,7 +2086,7 @@ function App() {
           <button onClick={()=>setShowConfig(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>📂</button>
           <button onClick={()=>setShowHelp(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>❓</button>
           <button onClick={()=>setShowSettings(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>⚙️</button>
-          <button onClick={gazeMode ? stopGaze : startGaze} style={{ width:38,height:38,borderRadius:10,border:`1px solid ${gazeMode?'#4CC9F0':'#2a2a3e'}`,background:gazeMode?'rgba(76,201,240,0.15)':'#1A1A2E',color:gazeMode?'#4CC9F0':'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',boxShadow:gazeMode?'0 0 12px rgba(76,201,240,0.3)':'none' }} title="시선 트래킹">👁️</button>
+          <button onClick={gazeLoading ? undefined : (gazeMode ? stopGaze : startGaze)} style={{ width:38,height:38,borderRadius:10,border:`1px solid ${gazeMode?'#4CC9F0':'#2a2a3e'}`,background:gazeMode?'rgba(76,201,240,0.15)':'#1A1A2E',color:gazeMode?'#4CC9F0':gazeLoading?'#555':'#aaa',fontSize:16,cursor:gazeLoading?'default':'pointer',display:'flex',alignItems:'center',justifyContent:'center',boxShadow:gazeMode?'0 0 12px rgba(76,201,240,0.3)':'none',opacity:gazeLoading?0.5:1 }} title={gazeLoading?'로딩 중...':'시선 트래킹'}>👁️</button>
           <button onClick={()=>{
             if (gazeMode && mode==='play') showToast('👁️ 시선 트래킹이 일시 중지됩니다');
             setMode(m=>m==='play'?'record':'play');
@@ -2416,7 +2275,6 @@ function App() {
       {gazeStartModal&&<GazeStartModal savedAt={gazeStartModal.savedAt} screenW={gazeStartModal.screenW} screenH={gazeStartModal.screenH} orientation={gazeStartModal.orientation} onNew={handleGazeNewCalib} onLoad={handleGazeLoadSaved} onDelete={handleGazeDeleteSaved} onCancel={()=>setGazeStartModal(null)} />}
       {gazeLoading&&<GazeLoadingScreen onCancel={stopGaze} />}
       {gazeCalib&&<CalibrationScreen onDone={handleGazeCalibDone} onCancel={stopGaze} onCalibClick={(x,y)=>{ calibPtsRef.current.push([x,y]); }} />}
-      {gazeAutoRecalib&&<GazeAutoRecalib onDone={()=>{ setGazeAutoRecalib(false); gazeQualityRef.current={frames:0,misses:0}; updatePadRects(); }} />}
     </div>
   );
 }
