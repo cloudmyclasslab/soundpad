@@ -22,8 +22,8 @@
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:#4CC9F0;cursor:pointer}
   input[type=text]{background:#1a1a2e;border:1px solid #2a2a3e;color:#fff;border-radius:8px;padding:10px 12px;font-size:14px;width:100%;outline:none}
   input[type=text]:focus{border-color:#4CC9F0}
-  #gaze-dot{position:fixed;width:28px;height:28px;border-radius:50%;background:rgba(76,201,240,0.25);border:3px solid #4CC9F0;pointer-events:none;z-index:9000;display:none;transform:translate(-50%,-50%);box-shadow:0 0 0 3px rgba(76,201,240,0.2),0 0 16px rgba(76,201,240,0.6);transition:left 0.06s linear,top 0.06s linear}
-  #gaze-dot::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:6px;height:6px;border-radius:50%;background:#4CC9F0}
+  #gaze-dot{position:fixed;width:52px;height:52px;border-radius:50%;background:rgba(76,201,240,0.18);border:4px solid #4CC9F0;pointer-events:none;z-index:9000;display:none;transform:translate(-50%,-50%);box-shadow:0 0 0 6px rgba(76,201,240,0.12),0 0 28px rgba(76,201,240,0.5);transition:left 0.22s ease-out,top 0.22s ease-out}
+  #gaze-dot::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:#4CC9F0;box-shadow:0 0 8px #4CC9F0}
   .dwell-ring{position:absolute;inset:0;pointer-events:none;z-index:20;border-radius:14px;overflow:hidden}
   .dwell-ring svg{position:absolute;inset:0;width:100%;height:100%}
   #webgazerVideoFeed,#webgazerFaceOverlay,#webgazerFaceFeedbackBox,#webgazerVideoContainerElement{display:none!important;width:1px!important;height:1px!important;opacity:0!important}
@@ -171,6 +171,25 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
       <button onPointerDown={e=>{e.stopPropagation();onCancel();}} style={{position:'absolute',bottom:40,left:'50%',transform:'translateX(-50%)',padding:'10px 28px',borderRadius:50,border:'1px solid #333',background:'transparent',color:'#666',fontSize:13,cursor:'pointer'}}>취소</button>
     </div>
   );
+}
+
+// ── GazeLoadingScreen ─────────────────────────────────────────
+function GazeLoadingScreen({ onCancel }) {
+  const [dots, setDots] = React.useState('');
+  React.useEffect(() => {
+    const t = setInterval(() => setDots(d => d.length >= 3 ? '' : d + '.'), 500);
+    return () => clearInterval(t);
+  }, []);
+  return <>
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.97)',zIndex:800,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20}}>
+      <div style={{fontSize:48}}>👁️</div>
+      <div style={{color:'#fff',fontWeight:800,fontSize:18}}>시선 처리 준비 중{dots}</div>
+      <div style={{color:'#555',fontSize:13}}>카메라로 얼굴을 인식하고 있습니다</div>
+      <div style={{width:48,height:48,border:'4px solid #1e1e3a',borderTop:'4px solid #4CC9F0',borderRadius:'50%',animation:'spin 1s linear infinite'}} />
+      <button onPointerDown={onCancel} style={{marginTop:16,padding:'10px 28px',borderRadius:50,border:'1px solid #333',background:'transparent',color:'#666',fontSize:13,cursor:'pointer'}}>취소</button>
+    </div>
+    <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+  </>;
 }
 
 // ── GazeStartModal ────────────────────────────────────────────
@@ -936,10 +955,14 @@ function App() {
   // Gaze tracking state
   const [gazeMode,       setGazeMode]       = useState(false);
   const [gazeCalib,      setGazeCalib]      = useState(false);
-  const [gazeStartModal, setGazeStartModal] = useState(null); // 저장된 캘리브 데이터 or null
+  const [gazeLoading,    setGazeLoading]    = useState(false); // begin() 후 첫 data 대기
+  const [gazeStartModal, setGazeStartModal] = useState(null);
   const gazeModeRef    = useRef(false);
   const gazeHoverRef   = useRef({idx:null, startMs:null, timerId:null});
   const padRectsRef    = useRef([]);
+  const gazeSmoothRef  = useRef({x: null, y: null});
+  const gazeCalibRef   = useRef(false); // setGazeCalib 동기화용
+  const gazeObsRef     = useRef(null);  // MutationObserver
   const calibPtsRef    = useRef([]); // 현재 캘리브레이션 수집 포인트
 
   useEffect(() => { padsRef.current = pads; },               [pads]);
@@ -950,6 +973,7 @@ function App() {
   useEffect(() => { camFacingRef.current = cameraFacing; },  [cameraFacing]);
   useEffect(() => { defRecTypeRef.current = defaultRecType; },[defaultRecType]);
   useEffect(() => { gazeModeRef.current = gazeMode; }, [gazeMode]);
+  useEffect(() => { gazeCalibRef.current = gazeCalib; }, [gazeCalib]);
 
   // ── Save ─────────────────────────────────────────────────────
   const performSave = async curPads => {
@@ -1272,14 +1296,17 @@ function App() {
 
   const stopGaze = useCallback(() => {
     try { window.webgazer?.pause(); } catch {}
+    gazeObsRef.current?.disconnect();
     const dot = document.getElementById('gaze-dot');
     if (dot) dot.style.display = 'none';
     // 모든 dwell 게이지 초기화
     document.querySelectorAll('.dwell-arc').forEach(el => el.setAttribute('stroke-dasharray','0 999'));
     clearTimeout(gazeHoverRef.current.timerId);
     gazeHoverRef.current = {idx:null, startMs:null, timerId:null};
+    gazeSmoothRef.current = {x: null, y: null};
     setGazeMode(false);
     setGazeCalib(false);
+    setGazeLoading(false);
   }, []);
 
   const handleGazeCalibDone = useCallback(async () => {
@@ -1306,18 +1333,54 @@ function App() {
     });
   }, []);
 
-  const startGazeEngine = useCallback(async () => {
+  const hideWebgazerEls = useCallback(() => {
+    const ids = ['webgazerVideoFeed','webgazerFaceOverlay','webgazerFaceFeedbackBox','webgazerVideoContainerElement','webgazerGazeDot'];
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.style.setProperty('display','none','important'); el.style.setProperty('visibility','hidden','important'); }
+    });
+    // tag 기반으로도 처리
+    document.querySelectorAll('video[id^="webgazer"], canvas[id^="webgazer"]').forEach(el => {
+      el.style.setProperty('display','none','important');
+    });
+  }, []);
+
+  const startGazeEngine = useCallback(async (onReady) => {
+    // MutationObserver로 WebGazer가 추가하는 video/canvas를 즉시 숨김
+    if (gazeObsRef.current) gazeObsRef.current.disconnect();
+    const obs = new MutationObserver(() => hideWebgazerEls());
+    obs.observe(document.body, {childList:true, subtree:true, attributes:true, attributeFilter:['style']});
+    gazeObsRef.current = obs;
+
+    let firstData = true;
     window.webgazer.setGazeListener((data) => {
         if (!data) return;
+
+        // 첫 gaze data 수신 시 캘리브레이션 화면으로 전환
+        if (firstData) {
+          firstData = false;
+          hideWebgazerEls();
+          onReady?.();
+          return;
+        }
+
+        // EMA smoothing
+        const ALPHA = 0.88;
+        const sm = gazeSmoothRef.current;
+        sm.x = sm.x === null ? data.x : sm.x * ALPHA + data.x * (1 - ALPHA);
+        sm.y = sm.y === null ? data.y : sm.y * ALPHA + data.y * (1 - ALPHA);
+
         const dot = document.getElementById('gaze-dot');
-        if (dot) { dot.style.left=data.x+'px'; dot.style.top=data.y+'px'; dot.style.display='block'; }
+        if (dot) { dot.style.left=sm.x+'px'; dot.style.top=sm.y+'px'; dot.style.display='block'; }
         if (!gazeModeRef.current) return;
+
+        const sx = sm.x, sy = sm.y;
         const rects = padRectsRef.current;
         let hovIdx = null;
         for (let i = 0; i < rects.length; i++) {
           const r = rects[i];
           if (!r) continue;
-          if (data.x >= r.left && data.x <= r.right && data.y >= r.top && data.y <= r.bottom) { hovIdx = i; break; }
+          if (sx >= r.left && sx <= r.right && sy >= r.top && sy <= r.bottom) { hovIdx = i; break; }
         }
         const gh = gazeHoverRef.current;
         if (hovIdx !== gh.idx) {
@@ -1344,7 +1407,8 @@ function App() {
         }
       })
     await window.webgazer.begin();
-  }, []);
+    hideWebgazerEls();
+  }, [hideWebgazerEls]);
 
   const startGaze = useCallback(async () => {
     if (!window.webgazer) {
@@ -1362,8 +1426,11 @@ function App() {
         setGazeStartModal(saved);
       } else {
         calibPtsRef.current = [];
-        await startGazeEngine();
-        setGazeCalib(true);
+        setGazeLoading(true);
+        await startGazeEngine(() => {
+          setGazeLoading(false);
+          setGazeCalib(true);
+        });
       }
     } catch(e) {
       console.error(e);
@@ -1375,16 +1442,19 @@ function App() {
     const saved = gazeStartModal;
     setGazeStartModal(null);
     try {
-      await startGazeEngine();
-      // 저장된 포인트 재주입 (모델이 준비될 때까지 잠시 대기)
-      setTimeout(() => {
-        applyCalibPoints(saved.points, saved.screenW, saved.screenH);
-        setGazeMode(true);
-        setTimeout(updatePadRects, 150);
-        showToast('✅ 캘리브레이션 불러왔습니다');
-      }, 1500);
+      setGazeLoading(true);
+      await startGazeEngine(() => {
+        setGazeLoading(false);
+        // 저장된 포인트 재주입
+        setTimeout(() => {
+          applyCalibPoints(saved.points, saved.screenW, saved.screenH);
+          setGazeMode(true);
+          setTimeout(updatePadRects, 150);
+          showToast('✅ 캘리브레이션 불러왔습니다');
+        }, 800);
+      });
     } catch(e) {
-      console.error(e);
+      setGazeLoading(false);
       alert('시작 오류: ' + e.message);
     }
   }, [gazeStartModal, startGazeEngine, applyCalibPoints, updatePadRects]);
@@ -1393,9 +1463,13 @@ function App() {
     setGazeStartModal(null);
     calibPtsRef.current = [];
     try {
-      await startGazeEngine();
-      setGazeCalib(true);
+      setGazeLoading(true);
+      await startGazeEngine(() => {
+        setGazeLoading(false);
+        setGazeCalib(true);
+      });
     } catch(e) {
+      setGazeLoading(false);
       alert('카메라 권한이 필요합니다: ' + e.message);
     }
   }, [startGazeEngine]);
@@ -1745,6 +1819,7 @@ function App() {
       {confirm&&<Confirm msg={confirm.msg} onOk={confirm.onOk} onCancel={()=>setConfirm(null)} />}
       {toast&&<Toast msg={toast} />}
       {gazeStartModal&&<GazeStartModal savedAt={gazeStartModal.savedAt} screenW={gazeStartModal.screenW} screenH={gazeStartModal.screenH} onNew={handleGazeNewCalib} onLoad={handleGazeLoadSaved} onDelete={handleGazeDeleteSaved} onCancel={()=>setGazeStartModal(null)} />}
+      {gazeLoading&&<GazeLoadingScreen onCancel={stopGaze} />}
       {gazeCalib&&<CalibrationScreen onDone={handleGazeCalibDone} onCancel={stopGaze} onCalibClick={(x,y)=>{ calibPtsRef.current.push([x,y]); }} />}
     </div>
   );
