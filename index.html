@@ -119,8 +119,17 @@ function unlockAudioPool() {
   }
 }
 
+// 앱 전체 터치마다 풀 유지 (iOS AudioContext suspended 방지)
+if (typeof document !== 'undefined') {
+  document.addEventListener('pointerdown', () => unlockAudioPool(), { passive: true });
+}
+
 function getUnlockedAudio() {
-  return _audioPool.pop() || new Audio();
+  return _audioPool.pop() || (() => {
+    // 풀이 비었을 때도 즉시 unlock 시도
+    unlockAudioPool();
+    return new Audio();
+  })();
 }
 function returnAudio(a) {
   try { a.pause(); a.src = ''; } catch {}
@@ -1545,6 +1554,7 @@ function App() {
               }
               gh.lastPlayIdx = hovIdx;
               gh.idx = null; gh.timerId = null;
+              unlockAudioPool(); // 풀 보충 + AudioContext 유지
               resumeAudioCtx(); // AudioContext running 상태 유지
               playPad(hovIdx);
             }, dwell);
