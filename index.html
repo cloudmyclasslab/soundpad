@@ -1586,8 +1586,11 @@ function App() {
   }, []);
   const stopPad = useCallback(idx => {
     setPlayKeys(k => { const n={...k}; delete n[idx]; return n; });
-    // lastPlayIdx는 시선이 패드 밖으로 나갈 때만 리셋 (gaze listener에서 처리)
-    // 여기서 리셋하면 재생 직후 즉시 재트리거되는 문제 발생
+    // 재생 종료 후 1.5초 뒤 쿨다운 해제 → 자동 반복 방지 + 학생 재선택 가능
+    setTimeout(() => {
+      const gh = gazeHoverRef.current;
+      if (gh.lastPlayIdx === idx) gh.lastPlayIdx = null;
+    }, 1500);
   }, []);
 
   // ── Auto Gaze Correction ─────────────────────────────────────
@@ -1733,7 +1736,9 @@ function App() {
         for (let i = 0; i < rects.length; i++) {
           const r = rects[i];
           if (!r || playKeysRef.current[i]) continue;
-          const m = Math.round(Math.min(r.right-r.left, r.bottom-r.top) * (nys?0.25:0.15));
+          // margin: 패드 크기의 15%(안진증 25%), 최대 30px
+          // 2×1 같은 대형 패드에서 화면 전체 커버 방지
+          const m = Math.min(Math.round(Math.min(r.right-r.left, r.bottom-r.top) * (nys?0.25:0.15)), 30);
           if (data.x>=r.left-m && data.x<=r.right+m && data.y>=r.top-m && data.y<=r.bottom+m) {
             const d = Math.hypot(data.x-(r.left+r.right)/2, data.y-(r.top+r.bottom)/2);
             if (d < minDist) { minDist=d; hovIdx=i; }
