@@ -22,7 +22,7 @@
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:#4CC9F0;cursor:pointer}
   input[type=text]{background:#1a1a2e;border:1px solid #2a2a3e;color:#fff;border-radius:8px;padding:10px 12px;font-size:14px;width:100%;outline:none}
   input[type=text]:focus{border-color:#4CC9F0}
-  #gaze-dot{position:fixed;width:70px;height:70px;border-radius:50%;background:rgba(76,201,240,0.15);border:5px solid #4CC9F0;pointer-events:none;z-index:9000;display:none;transform:translate(-50%,-50%);box-shadow:0 0 0 8px rgba(76,201,240,0.08),0 0 32px rgba(76,201,240,0.45)}
+  #gaze-dot{position:fixed;width:70px;height:70px;border-radius:50%;background:rgba(76,201,240,0.15);border:5px solid #4CC9F0;pointer-events:none;z-index:9000;display:none;transform:translate(-50%,-50%);box-shadow:0 0 0 8px rgba(76,201,240,0.08),0 0 32px rgba(76,201,240,0.45);transition:left 0.2s ease,top 0.2s ease}
   #gaze-dot::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#4CC9F0;box-shadow:0 0 10px #4CC9F0}
   .dwell-ring{position:absolute;inset:0;pointer-events:none;z-index:20;border-radius:14px;overflow:hidden}
   .dwell-ring svg{position:absolute;inset:0;width:100%;height:100%}
@@ -1362,21 +1362,30 @@ function App() {
         }
         if (!data) return;
 
-        // EMA로 목표 좌표 스무딩 후 저장 (dot 이동은 rAF에서)
-        const ALPHA = 0.65;
-        const sm = gazeSmoothRef.current;
-        sm.x = sm.x === null ? data.x : sm.x * ALPHA + data.x * (1 - ALPHA);
-        sm.y = sm.y === null ? data.y : sm.y * ALPHA + data.y * (1 - ALPHA);
-
-        if (!gazeModeRef.current) return;
-        const sx = sm.x, sy = sm.y;
+        // 어느 패드 위인지 계산
         const rects = padRectsRef.current;
         let hovIdx = null;
         for (let i = 0; i < rects.length; i++) {
           const r = rects[i];
           if (!r) continue;
-          if (sx >= r.left && sx <= r.right && sy >= r.top && sy <= r.bottom) { hovIdx = i; break; }
+          if (data.x >= r.left && data.x <= r.right && data.y >= r.top && data.y <= r.bottom) { hovIdx = i; break; }
         }
+
+        // 포인터를 패드 중앙으로 snap (패드 밖이면 숨김)
+        const dot = document.getElementById('gaze-dot');
+        if (dot) {
+          if (hovIdx !== null) {
+            const r = rects[hovIdx];
+            dot.style.left = ((r.left + r.right) / 2) + 'px';
+            dot.style.top  = ((r.top + r.bottom) / 2) + 'px';
+            dot.style.display = 'block';
+          } else {
+            dot.style.display = 'none';
+          }
+        }
+
+        if (!gazeModeRef.current) return;
+
         const gh = gazeHoverRef.current;
         if (hovIdx !== gh.idx) {
           if (gh.idx !== null) {
@@ -1384,7 +1393,7 @@ function App() {
             if (prev) prev.setAttribute('stroke-dasharray','0 999');
           }
           clearTimeout(gh.timerId);
-          gh.idx = hovIdx; gh.startMs = hovIdx !== null ? Date.now() : null; gh.timerId = null;
+          gh.idx = hovIdx; gh.timerId = null;
           if (hovIdx !== null) {
             const arc = document.getElementById(`dwell-arc-${hovIdx}`);
             if (arc) {
@@ -1395,29 +1404,12 @@ function App() {
             gh.timerId = setTimeout(() => {
               const arc2 = document.getElementById(`dwell-arc-${hovIdx}`);
               if (arc2) arc2.setAttribute('stroke-dasharray','0 999');
-              gh.idx = null; gh.startMs = null; gh.timerId = null;
+              gh.idx = null; gh.timerId = null;
               playPad(hovIdx);
             }, DWELL_MS);
           }
         }
       });
-
-    // rAF lerp loop - 현재 표시 위치를 목표 방향으로 부드럽게 이동
-    const LERP = 0.1; // 낮을수록 더 부드럽고 느림
-    let curX = null, curY = null;
-    const lerpLoop = () => {
-      const sm = gazeSmoothRef.current;
-      const dot = document.getElementById('gaze-dot');
-      if (dot && sm.x !== null) {
-        curX = curX === null ? sm.x : curX + (sm.x - curX) * LERP;
-        curY = curY === null ? sm.y : curY + (sm.y - curY) * LERP;
-        dot.style.left = curX + 'px';
-        dot.style.top  = curY + 'px';
-        dot.style.display = 'block';
-      }
-      requestAnimationFrame(lerpLoop);
-    };
-    requestAnimationFrame(lerpLoop);
     await window.webgazer.begin();
     hideWebgazerEls();
     // gaze listener가 아예 호출 안 되는 경우 fallback (4초 후 강제 진행)
