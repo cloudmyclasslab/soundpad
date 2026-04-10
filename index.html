@@ -451,7 +451,7 @@ function GazeAutoRecalib({ onDone }) {
     <div style={{position:'fixed',inset:0,background:'#000',zIndex:850,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20,touchAction:'none'}}>
       <div style={{color:'#aaa',fontSize:13,letterSpacing:1}}>화면 중앙을 바라봐 주세요</div>
 
-      {/* 고정 파란 점 + 글로우 */}
+      {/* 고정 파란 원 + 안쪽 작은 점 바운스 */}
       <div style={{
         width:80, height:80, borderRadius:'50%',
         background:'rgba(76,201,240,0.15)',
@@ -463,6 +463,7 @@ function GazeAutoRecalib({ onDone }) {
           width:18, height:18, borderRadius:'50%',
           background:'#4CC9F0',
           boxShadow:'0 0 20px rgba(76,201,240,1), 0 0 40px rgba(76,201,240,0.5)',
+          animation:'pulse 0.8s ease-in-out infinite',
         }} />
       </div>
 
