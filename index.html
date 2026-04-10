@@ -1354,15 +1354,13 @@ function App() {
 
     let firstData = true;
     window.webgazer.setGazeListener((data) => {
-        if (!data) return;
-
-        // 첫 gaze data 수신 시 캘리브레이션 화면으로 전환
+        // 첫 콜백 수신 시 무조건 onReady (data가 null이어도 WebGazer가 실행 중임을 의미)
         if (firstData) {
           firstData = false;
           hideWebgazerEls();
           onReady?.();
-          return;
         }
+        if (!data) return;
 
         // EMA smoothing
         const ALPHA = 0.88;
@@ -1408,6 +1406,10 @@ function App() {
       })
     await window.webgazer.begin();
     hideWebgazerEls();
+    // gaze listener가 아예 호출 안 되는 경우 fallback (4초 후 강제 진행)
+    setTimeout(() => {
+      if (firstData) { firstData = false; onReady?.(); }
+    }, 4000);
   }, [hideWebgazerEls]);
 
   const startGaze = useCallback(async () => {
