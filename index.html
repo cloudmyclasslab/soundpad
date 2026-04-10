@@ -115,13 +115,73 @@ function PadAudio({ url, volume, onEnd }) {
 }
 
 // ── Gaze Calibration ──────────────────────────────────────────
-const CALIB_GRID = [
-  [10,10],[50,10],[90,10],
-  [10,50],[50,50],[90,50],
-  [10,90],[50,90],[90,90],
-];
-const CLICKS_PER_PT = 5;
 const DWELL_MS = 1500;
+// 3×3 그리드 중앙 퍼센트 좌표
+const CALIB_GRID = [
+  [16.7,16.7],[50,16.7],[83.3,16.7],
+  [16.7,50  ],[50,50  ],[83.3,50  ],
+  [16.7,83.3],[50,83.3],[83.3,83.3],
+];
+const CLICKS_PER_PT = 3;
+
+function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
+  const [cur, setCur] = React.useState(0);
+
+  const handleTap = (i) => {
+    if (i !== cur) return; // 현재 순서 패드만 탭 가능
+    const x = window.innerWidth  * CALIB_GRID[i][0] / 100;
+    const y = window.innerHeight * CALIB_GRID[i][1] / 100;
+    for (let k = 0; k < CLICKS_PER_PT; k++) {
+      try { window.webgazer?.recordScreenPosition(x, y, 'click'); } catch {}
+    }
+    onCalibClick?.(x, y);
+    if (i + 1 >= CALIB_GRID.length) { onDone(); }
+    else { setCur(i + 1); }
+  };
+
+  const labels = ['↖','↑','↗','←','●','→','↙','↓','↘'];
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.95)',zIndex:800,display:'flex',flexDirection:'column',touchAction:'none'}}>
+      {/* 안내 */}
+      <div style={{textAlign:'center',padding:'16px 0 10px',flexShrink:0}}>
+        <div style={{color:'#fff',fontWeight:800,fontSize:17}}>👁️ 시선 캘리브레이션</div>
+        <div style={{color:'#aaa',fontSize:12,marginTop:4}}>파란 패드를 바라보면서 탭하세요 ({cur+1} / {CALIB_GRID.length})</div>
+        <div style={{width:200,height:4,background:'#222',borderRadius:2,margin:'8px auto 0',overflow:'hidden'}}>
+          <div style={{width:`${cur/CALIB_GRID.length*100}%`,height:'100%',background:'linear-gradient(90deg,#4CC9F0,#4361EE)',borderRadius:2,transition:'width 0.2s'}} />
+        </div>
+      </div>
+
+      {/* 3×3 패드 그리드 */}
+      <div style={{flex:1,display:'grid',gridTemplateColumns:'repeat(3,1fr)',gridTemplateRows:'repeat(3,1fr)',gap:6,padding:6}}>
+        {CALIB_GRID.map((_, i) => {
+          const isActive  = i === cur;
+          const isDone    = i < cur;
+          return (
+            <div
+              key={i}
+              onPointerDown={() => handleTap(i)}
+              style={{
+                borderRadius:16,
+                background: isDone ? 'rgba(6,214,160,0.15)' : isActive ? 'rgba(76,201,240,0.2)' : 'rgba(255,255,255,0.04)',
+                border: isDone ? '2px solid #06D6A0' : isActive ? '3px solid #4CC9F0' : '2px solid rgba(255,255,255,0.08)',
+                display:'flex',alignItems:'center',justifyContent:'center',
+                cursor: isActive ? 'pointer' : 'default',
+                boxShadow: isActive ? '0 0 32px rgba(76,201,240,0.5)' : 'none',
+                transition:'all 0.2s',
+                fontSize: isActive ? 36 : 22,
+              }}
+            >
+              {isDone ? '✓' : isActive ? <span style={{animation:'pulse 0.8s ease-in-out infinite',display:'inline-block'}}>{labels[i]}</span> : <span style={{opacity:0.2}}>{labels[i]}</span>}
+            </div>
+          );
+        })}
+      </div>
+
+      <button onPointerDown={e=>{e.stopPropagation();onCancel();}} style={{margin:'8px auto 16px',padding:'10px 32px',borderRadius:50,border:'1px solid #333',background:'transparent',color:'#555',fontSize:13,cursor:'pointer'}}>취소</button>
+    </div>
+  );
+}
 
 function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
   const [stage,   setStage]   = React.useState('range'); // 'range' | 'points'
@@ -1505,10 +1565,10 @@ function App() {
       });
     await window.webgazer.begin();
     hideWebgazerEls();
-    // gaze listener가 아예 호출 안 되는 경우 fallback (4초 후 강제 진행)
+    // gaze listener가 아예 호출 안 되는 경우 fallback (2초 후 강제 진행)
     setTimeout(() => {
       if (firstData) { firstData = false; onReady?.(); }
-    }, 4000);
+    }, 2000);
   }, [hideWebgazerEls]);
 
   const startGaze = useCallback(async () => {
