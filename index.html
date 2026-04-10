@@ -472,6 +472,99 @@ function GazeAutoRecalib({ onDone }) {
   );
 }
 
+// ── GazePadRecalib ────────────────────────────────────────────
+// 저장된 캘리브레이션 불러온 후 패드 위치 n개를 순서대로 보정
+function GazePadRecalib({ padRects, onDone }) {
+  const [cur, setCur] = React.useState(0);
+  const [progress, setProgress] = React.useState(0);
+  const HOLD_MS = 2500;
+  const SIZE = 90, R = 36, C = 2 * Math.PI * R;
+
+  React.useEffect(() => {
+    if (!padRects.length || cur >= padRects.length) { onDone(); return; }
+    setProgress(0);
+    const start = performance.now();
+    let raf;
+    const animate = (now) => {
+      const p = Math.min((now - start) / HOLD_MS, 1);
+      setProgress(p);
+      if (p < 1) { raf = requestAnimationFrame(animate); }
+      else {
+        const r = padRects[cur];
+        const cx = (r.left + r.right) / 2;
+        const cy = (r.top  + r.bottom) / 2;
+        for (let k = 0; k < 8; k++) {
+          try { window.webgazer?.recordScreenPosition(cx, cy, 'click'); } catch {}
+        }
+        setCur(c => c + 1);
+      }
+    };
+    raf = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(raf);
+  }, [cur, padRects.length]);
+
+  if (!padRects.length || cur >= padRects.length) return null;
+
+  const r = padRects[cur];
+  const cx = (r.left + r.right) / 2;
+  const cy = (r.top  + r.bottom) / 2;
+  const dash = C * (1 - progress);
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.68)',zIndex:850,touchAction:'none'}}>
+      {/* 안내 텍스트 */}
+      <div style={{position:'absolute',top:24,left:0,right:0,textAlign:'center',pointerEvents:'none'}}>
+        <div style={{color:'#fff',fontWeight:800,fontSize:16}}>👁️ 패드를 바라봐 주세요</div>
+        <div style={{color:'#aaa',fontSize:13,marginTop:4}}>{cur + 1} / {padRects.length}</div>
+      </div>
+
+      {/* 대상 패드 하이라이트 테두리 */}
+      <div style={{
+        position:'absolute',
+        left: r.left - 4, top: r.top - 4,
+        width: r.right - r.left + 8, height: r.bottom - r.top + 8,
+        border:'3px solid #FFD60A',
+        borderRadius:18,
+        boxShadow:'0 0 32px rgba(255,214,10,0.55)',
+        pointerEvents:'none',
+      }} />
+
+      {/* 중앙 원형 프로그레스 */}
+      <div style={{
+        position:'absolute',
+        left: cx - SIZE/2, top: cy - SIZE/2,
+        width: SIZE, height: SIZE,
+        pointerEvents:'none',
+      }}>
+        <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
+          <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="rgba(255,214,10,0.2)" strokeWidth="6"/>
+          <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="#FFD60A" strokeWidth="6"
+            strokeDasharray={`${C - dash} ${dash}`}
+            strokeLinecap="round"
+            transform={`rotate(-90 ${SIZE/2} ${SIZE/2})`}
+            style={{transition:'stroke-dasharray 0.05s linear'}}
+          />
+        </svg>
+        <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div style={{
+            width:14, height:14, borderRadius:'50%',
+            background:'#FFD60A',
+            boxShadow:'0 0 18px rgba(255,214,10,1)',
+            animation:'pulse 0.8s ease-in-out infinite',
+          }} />
+        </div>
+      </div>
+
+      <button onPointerDown={onDone} style={{
+        position:'absolute', bottom:32, left:'50%', transform:'translateX(-50%)',
+        padding:'8px 28px', borderRadius:50,
+        border:'1px solid #333', background:'transparent', color:'#444',
+        fontSize:12, cursor:'pointer',
+      }}>건너뛰기</button>
+    </div>
+  );
+}
+
 function GazeLoadingScreen({ onCancel }) {
   const [dots, setDots] = React.useState('');
   React.useEffect(() => {
@@ -1278,6 +1371,7 @@ function App() {
   const [gazeLoading,    setGazeLoading]    = useState(false);
   const [gazeStartModal, setGazeStartModal] = useState(null);
   const [gazeAutoRecalib,setGazeAutoRecalib]= useState(false);
+  const [gazePadRecalib, setGazePadRecalib] = useState(false);
   const gazeModeRef    = useRef(false);
   const gazeHoverRef   = useRef({idx:null, timerId:null, lastPlayIdx:null, exitCount:0, dwellAttempts:0, dwellSuccesses:0});
   const padRectsRef    = useRef([]);
@@ -1974,27 +2068,21 @@ function App() {
 
   const handleAutoRecalibDone = useCallback(() => {
     setGazeAutoRecalib(false);
-    setGazeMode(true);
-    gazeModeRef.current = true;
     gazeCalibRef.current = false;
-    gazeStartTimeRef.current = Date.now();
-    // 현재 패드 위치에 보정 포인트 등록
+    // 패드 위치 갱신 후 패드별 순차 보정 시작
     setTimeout(() => {
       updatePadRects();
-      setTimeout(() => {
-        const rects = padRectsRef.current;
-        rects.forEach(r => {
-          if (!r) return;
-          const cx = (r.left + r.right) / 2;
-          const cy = (r.top  + r.bottom) / 2;
-          for (let k = 0; k < 3; k++) {
-            try { window.webgazer?.recordScreenPosition(cx, cy, 'click'); } catch {}
-          }
-        });
-      }, 150);
+      setTimeout(() => setGazePadRecalib(true), 100);
     }, 100);
-    showToast('✅ 보정 완료');
   }, [updatePadRects]);
+
+  const handlePadRecalibDone = useCallback(() => {
+    setGazePadRecalib(false);
+    setGazeMode(true);
+    gazeModeRef.current = true;
+    gazeStartTimeRef.current = Date.now();
+    showToast('✅ 보정 완료');
+  }, []);
 
   const handleGazeDeleteSaved = useCallback(async () => {
     await dbDel('gaze_calibration');
@@ -2371,6 +2459,7 @@ function App() {
       {gazeLoading&&<GazeLoadingScreen onCancel={stopGaze} />}
       {gazeCalib&&<CalibrationScreen onDone={handleGazeCalibDone} onCancel={stopGaze} onCalibClick={(x,y)=>{ calibPtsRef.current.push([x,y]); }} />}
       {gazeAutoRecalib&&<GazeAutoRecalib onDone={handleAutoRecalibDone} />}
+      {gazePadRecalib&&<GazePadRecalib padRects={padRectsRef.current.filter(Boolean)} onDone={handlePadRecalibDone} />}
     </div>
   );
 }
