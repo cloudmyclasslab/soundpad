@@ -118,17 +118,11 @@ function PadVideo({ url, volume, onEnd, trimStart, trimEnd }) {
 
 function PadAudio({ url, volume, onEnd }) {
   useEffect(() => {
+    unlockAudio();
     const a = new Audio(url);
     a.volume = Math.max(0, Math.min(1, volume));
     a.onended = onEnd;
-    // AudioContext unlock 후 재생 (iOS 자동재생 제한 해제)
-    const ctx = getAudioCtx();
-    const doPlay = () => a.play().catch(console.error);
-    if (ctx && ctx.state !== 'running') {
-      ctx.resume().then(doPlay).catch(doPlay);
-    } else {
-      doPlay();
-    }
+    a.play().catch(console.error);
     return () => { a.pause(); a.src = ''; };
   }, []);
   return null;
@@ -1354,7 +1348,10 @@ function App() {
     const dot = document.getElementById('gaze-dot');
     if (dot) dot.style.display = 'none';
     // 모든 dwell 게이지 초기화
-    document.querySelectorAll('.dwell-arc').forEach(el => el.setAttribute('stroke-dasharray','0 999'));
+    document.querySelectorAll('.dwell-arc').forEach(el => {
+      el.style.transition = 'none';
+      el.setAttribute('stroke-dasharray','0 999');
+    });
     clearTimeout(gazeHoverRef.current.timerId);
     gazeHoverRef.current = {idx:null, startMs:null, timerId:null};
     gazeSmoothRef.current = {x: null, y: null};
@@ -1439,30 +1436,33 @@ function App() {
           }
         }
 
+        const resetArc = (id) => {
+          const el = document.getElementById(`dwell-arc-${id}`);
+          if (el) { el.style.transition = 'none'; el.setAttribute('stroke-dasharray','0 999'); }
+        };
+
         if (!gazeModeRef.current) return;
-        if (modeRef.current !== 'play') return; // 녹음 모드에서는 dwell 비활성화
+        if (modeRef.current !== 'play') return;
 
         const gh = gazeHoverRef.current;
         if (hovIdx !== gh.idx) {
-          if (gh.idx !== null) {
-            const prev = document.getElementById(`dwell-arc-${gh.idx}`);
-            if (prev) prev.setAttribute('stroke-dasharray','0 999');
-          }
+          if (gh.idx !== null) resetArc(gh.idx);
           clearTimeout(gh.timerId);
-          // 다른 유효 패드를 봤을 때만 쿨다운 해제 (패드 밖은 리셋 안 함)
           if (hovIdx !== null && hovIdx !== gh.lastPlayIdx) gh.lastPlayIdx = null;
           const blocked = (hovIdx !== null && hovIdx === gh.lastPlayIdx);
           gh.idx = hovIdx; gh.timerId = null;
           if (hovIdx !== null && !blocked) {
             const arc = document.getElementById(`dwell-arc-${hovIdx}`);
             if (arc) {
-              arc.style.transition = `stroke-dasharray ${DWELL_MS}ms linear`;
+              arc.style.transition = 'none';
               arc.setAttribute('stroke-dasharray','0 999');
-              requestAnimationFrame(() => requestAnimationFrame(() => arc.setAttribute('stroke-dasharray','999 0')));
+              requestAnimationFrame(() => {
+                arc.style.transition = `stroke-dasharray ${DWELL_MS}ms linear`;
+                requestAnimationFrame(() => arc.setAttribute('stroke-dasharray','999 0'));
+              });
             }
             gh.timerId = setTimeout(() => {
-              const arc2 = document.getElementById(`dwell-arc-${hovIdx}`);
-              if (arc2) arc2.setAttribute('stroke-dasharray','0 999');
+              resetArc(hovIdx);
               gh.lastPlayIdx = hovIdx;
               gh.idx = null; gh.timerId = null;
               playPad(hovIdx);
