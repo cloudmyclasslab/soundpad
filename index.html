@@ -421,50 +421,55 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
 // ── GazeAutoRecalib ───────────────────────────────────────────
 // 저장된 캘리브레이션 불러온 후 가운데 1포인트 빠른 보정
 function GazeAutoRecalib({ onDone }) {
-  const [count, setCount] = React.useState(3);
-  React.useEffect(() => {
-    if (count <= 0) {
-      const x = window.innerWidth  / 2;
-      const y = window.innerHeight / 2;
-      for (let k = 0; k < 8; k++) {
-        try { window.webgazer?.recordScreenPosition(x, y, 'click'); } catch {}
-      }
-      onDone();
-      return;
-    }
-    const t = setTimeout(() => setCount(c => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [count]);
+  const HOLD_MS = 3000;
+  const [progress, setProgress] = React.useState(0);
+  const rafRef  = React.useRef(null);
+  const startRef = React.useRef(null);
 
-  const R = 44, C = 2 * Math.PI * R;
-  const filled = (3 - count) / 3;
+  React.useEffect(() => {
+    startRef.current = performance.now();
+    const animate = (now) => {
+      const p = Math.min((now - startRef.current) / HOLD_MS, 1);
+      setProgress(p);
+      if (p < 1) { rafRef.current = requestAnimationFrame(animate); }
+      else {
+        const x = window.innerWidth  / 2;
+        const y = window.innerHeight / 2;
+        for (let k = 0; k < 8; k++) {
+          try { window.webgazer?.recordScreenPosition(x, y, 'click'); } catch {}
+        }
+        onDone();
+      }
+    };
+    rafRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  // 큰 원 → 작은 점으로 수축
+  const size = 120 - progress * 108; // 120px → 12px
+  const opacity = 0.9 - progress * 0.5;
 
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:850,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:24,touchAction:'none'}}>
-      <div style={{color:'#aaa',fontSize:14,letterSpacing:1}}>화면 중앙을 바라봐 주세요</div>
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.92)',zIndex:850,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:28,touchAction:'none'}}>
+      <div style={{color:'rgba(255,255,255,0.4)',fontSize:13,letterSpacing:1}}>화면 중앙을 바라봐 주세요</div>
 
-      {/* 원 + 숫자 일체형 */}
-      <div style={{position:'relative',width:120,height:120,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <svg style={{position:'absolute',inset:0,width:'100%',height:'100%'}} viewBox="0 0 120 120">
-          {/* 배경 원 */}
-          <circle cx="60" cy="60" r={R} fill="none" stroke="rgba(76,201,240,0.15)" strokeWidth="6"/>
-          {/* 진행 원 */}
-          <circle cx="60" cy="60" r={R} fill="none" stroke="#4CC9F0" strokeWidth="6"
-            strokeDasharray={`${C*filled} ${C*(1-filled)}`}
-            strokeLinecap="round" transform="rotate(-90 60 60)"
-            style={{transition:'stroke-dasharray 0.9s linear'}}/>
-        </svg>
-        {/* 중앙 도트 + 숫자 */}
-        {count > 0 ? (
-          <span key={count} style={{fontSize:52,fontWeight:900,color:'#fff',lineHeight:1,textShadow:'0 0 20px rgba(76,201,240,0.8)',animation:'countPop 0.4s ease-out'}}>
-            {count}
-          </span>
-        ) : (
-          <span style={{fontSize:40,color:'#4CC9F0'}}>✓</span>
-        )}
+      {/* 수축하는 원 */}
+      <div style={{position:'relative',width:140,height:140,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        {/* 고정 중앙 점 */}
+        <div style={{position:'absolute',width:10,height:10,borderRadius:'50%',background:'#4CC9F0',boxShadow:'0 0 12px rgba(76,201,240,0.8)',zIndex:2}} />
+        {/* 수축하는 원 테두리 */}
+        <div style={{
+          position:'absolute',
+          width:size, height:size,
+          borderRadius:'50%',
+          border:'3px solid #4CC9F0',
+          boxShadow:`0 0 ${Math.round(20*(1-progress))}px rgba(76,201,240,0.4)`,
+          opacity,
+          transition:'none',
+        }} />
       </div>
 
-      <button onPointerDown={onDone} style={{padding:'8px 28px',borderRadius:50,border:'1px solid #333',background:'transparent',color:'#444',fontSize:12,cursor:'pointer'}}>건너뛰기</button>
+      <button onPointerDown={onDone} style={{padding:'7px 24px',borderRadius:50,border:'1px solid #2a2a2a',background:'transparent',color:'#333',fontSize:11,cursor:'pointer'}}>건너뛰기</button>
     </div>
   );
 }
