@@ -1306,14 +1306,6 @@ function App() {
   }, []);
 
   const startGazeEngine = useCallback(async () => {
-    // begin 전에 video preview 비활성화 (begin 후 showVideo 호출 금지 - prediction loop 멈춤)
-    window.webgazer.params.showVideoPreview = false;
-    window.webgazer.params.showFaceOverlay  = false;
-    window.webgazer.params.showFaceFeedbackBox = false;
-    window.webgazer.params.saveDataAcrossSessions = false;
-
-    window.webgazer.setRegression('ridge');
-    window.webgazer.setTracker('TFFacemesh');
     window.webgazer.setGazeListener((data) => {
         if (!data || !gazeModeRef.current) return;
         const dot = document.getElementById('gaze-dot');
