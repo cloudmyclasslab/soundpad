@@ -90,8 +90,17 @@ function resizeImage(file, cb) {
 }
 
 // ── Components ────────────────────────────────────────────────
-// AudioContext - user gesture 시 iOS unlock 전용
+// ── iOS Audio Unlock Pool ─────────────────────────────────────
+// iOS Safari는 user gesture 없이 Audio.play() 차단.
+// user gesture 시 빈 Audio 객체를 미리 play→pause 해두면
+// 이후 src를 바꿔도 소리가 나옴 (same Audio instance 재사용).
 let _audioCtx = null;
+const _audioPool = []; // 언락된 Audio 인스턴스 풀
+const POOL_SIZE = 8;
+
+// silent 1-frame WAV (base64)
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
+
 function resumeAudioCtx() {
   try {
     if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -99,27 +108,67 @@ function resumeAudioCtx() {
   } catch {}
 }
 
+// user gesture(탭) 시 호출 → Audio 풀 언락
+function unlockAudioPool() {
+  resumeAudioCtx();
+  const needed = POOL_SIZE - _audioPool.length;
+  for (let i = 0; i < needed; i++) {
+    const a = new Audio(SILENT_WAV);
+    a.volume = 0;
+    a.play().then(() => { a.pause(); a.src = ''; a.volume = 1; _audioPool.push(a); }).catch(() => {});
+  }
+}
+
+function getUnlockedAudio() {
+  return _audioPool.pop() || new Audio();
+}
+function returnAudio(a) {
+  try { a.pause(); a.src = ''; } catch {}
+  if (_audioPool.length < POOL_SIZE) _audioPool.push(a);
+}
+
 function PadVideo({ url, volume, onEnd, trimStart, trimEnd }) {
   const ref = useRef(null);
+  const audioRef = useRef(null);
   useEffect(() => {
     const v = ref.current; if (!v) return;
-    v.volume = Math.max(0, Math.min(1, volume));
+    // video는 muted로 시각만 담당 (iOS audio 차단 우회)
+    // audio는 언락된 Audio 인스턴스로 별도 재생
+    v.muted = true;
     if (trimStart) v.currentTime = trimStart;
     v.play().catch(console.error);
-    v.ontimeupdate = () => { if (trimEnd && v.currentTime >= trimEnd) { v.pause(); onEnd(); } };
-    v.onended = onEnd;
-    return () => { v.pause(); v.ontimeupdate = null; v.onended = null; };
+
+    const a = getUnlockedAudio();
+    a.src = url;
+    a.volume = Math.max(0, Math.min(1, volume));
+    if (trimStart) a.currentTime = trimStart;
+    a.play().catch(console.error);
+    audioRef.current = a;
+
+    const handleEnd = () => { returnAudio(a); audioRef.current = null; onEnd(); };
+    if (trimEnd) {
+      const check = () => { if (v.currentTime >= trimEnd) { v.pause(); handleEnd(); } };
+      v.ontimeupdate = check;
+    } else {
+      a.onended = handleEnd;
+      v.onended = () => { if (!audioRef.current) return; }; // audio가 먼저 끝날 수 있음
+    }
+    return () => {
+      v.pause(); v.ontimeupdate = null; v.onended = null;
+      if (audioRef.current) { returnAudio(audioRef.current); audioRef.current = null; }
+    };
   }, []);
-  return <video ref={ref} src={url} playsInline style={{ position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',borderRadius:14,zIndex:1 }} />;
+  return <video ref={ref} src={url} playsInline muted style={{ position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',borderRadius:14,zIndex:1 }} />;
 }
 
 function PadAudio({ url, volume, onEnd }) {
   useEffect(() => {
-    const a = new Audio(url);
+    const a = getUnlockedAudio();
+    a.src = url;
     a.volume = Math.max(0, Math.min(1, volume));
-    a.onended = onEnd;
+    a.onended = () => { returnAudio(a); onEnd(); };
     a.play().catch(console.error);
-    return () => { a.pause(); a.src = ''; };
+    return () => { returnAudio(a); };
   }, []);
   return null;
 }
@@ -139,7 +188,7 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
 
   const handleTap = (i) => {
     if (i !== cur) return;
-    resumeAudioCtx();
+    unlockAudioPool();
     const x = window.innerWidth  * CALIB_GRID[i][0] / 100;
     const y = window.innerHeight * CALIB_GRID[i][1] / 100;
     for (let k = 0; k < CLICKS_PER_PT; k++) {
@@ -1496,7 +1545,7 @@ function App() {
               }
               gh.lastPlayIdx = hovIdx;
               gh.idx = null; gh.timerId = null;
-              resumeAudioCtx();
+              resumeAudioCtx(); // AudioContext running 상태 유지
               playPad(hovIdx);
             }, dwell);
           }
@@ -1702,7 +1751,7 @@ function App() {
   };
 
   const handlePadDown = (e, idx) => {
-    resumeAudioCtx(); // user gesture로 AudioContext unlock
+    unlockAudioPool();
     if (mode==='play') { playPad(idx); return; }
     if (recIdx !== null) return;
     const x0=e.clientX, y0=e.clientY;
