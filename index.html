@@ -214,7 +214,7 @@ const CALIB_ORDER = [
   {x:83.3,y:50,   cell:5}, // 우측 중앙
   {x:50,  y:83.3, cell:7}, // 하단 중앙
 ];
-const ACCURACY_THRESHOLD = 120;
+const ACCURACY_THRESHOLD = () => Math.round(window.innerWidth * 0.08);
 const EMOJIS_BY_CELL = ['⭐','🌟','✨','🎯','🌈','🎪','💫','🔥','🎨'];
 
 function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
@@ -284,7 +284,7 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
       const err = Math.round(Math.hypot(mx-ex, my-ey));
       setAccuracy(err);
       setTimeout(() => {
-        if (err <= ACCURACY_THRESHOLD || maxPts >= 9) {
+        if (err <= ACCURACY_THRESHOLD() || maxPts >= 9) {
           onDone(); // 정확 or 이미 전체 완료 → 종료
         } else {
           setMaxPts(9); setCur(5); setPhase('calibrating'); // 엣지 추가
@@ -347,7 +347,7 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
           {phase==='calibrating' && <span style={{color:'#555'}}>({cur+1} / {maxPts})</span>}
           {phase==='verifying' && (accuracy === null
             ? '화면 중앙을 바라봐 주세요'
-            : accuracy <= ACCURACY_THRESHOLD
+            : accuracy <= ACCURACY_THRESHOLD()
               ? <span style={{color:'#06D6A0',fontWeight:700}}>✓ 정확도 양호 ({accuracy}px)</span>
               : <span style={{color:'#FFB703',fontWeight:700}}>추가 보정 진행 중 ({accuracy}px)</span>
           )}
@@ -493,52 +493,46 @@ function GazeAutoRecalib({ onDone }) {
 }
 
 // ── GazePadRecalib ────────────────────────────────────────────
-// 열별 X, 행별 Y 교차점을 순서대로 보정 (새 캘리브레이션과 동일 위치 커버)
-function GazePadRecalib({ allRects, cols, rows, onDone }) {
-  // 열별 centerX, 행별 centerY 계산
+// cols/rows 기반으로 CALIB_ORDER 동일 비율 위치에서 보정
+function GazePadRecalib({ cols, rows, onDone }) {
+  // cols/rows → CALIB_ORDER와 동일 비율 위치
+  const getPcts = (n) => {
+    if (n === 1) return [50];
+    if (n === 2) return [16.7, 83.3];
+    if (n === 3) return [16.7, 50, 83.3];
+    return Array.from({length: n}, (_, i) => 16.7 + (83.3 - 16.7) * i / (n - 1));
+  };
+
   const points = React.useMemo(() => {
-    const colXs = Array.from({length: cols}, (_, c) => {
-      const xs = [];
-      for (let r = 0; r < rows; r++) {
-        const rect = allRects[r * cols + c];
-        if (rect) xs.push((rect.left + rect.right) / 2);
-      }
-      return xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : null;
-    }).filter(x => x !== null);
-
-    const rowYs = Array.from({length: rows}, (_, r) => {
-      const ys = [];
-      for (let c = 0; c < cols; c++) {
-        const rect = allRects[r * cols + c];
-        if (rect) ys.push((rect.top + rect.bottom) / 2);
-      }
-      return ys.length ? ys.reduce((a,b)=>a+b,0)/ys.length : null;
-    }).filter(y => y !== null);
-
-    // 순서: 모서리 먼저 (TL→TR→BL→BR), 나머지는 좌→우, 위→아래
+    const colPcts = getPcts(cols);
+    const rowPcts = getPcts(rows);
     const all = [];
-    for (let ry = 0; ry < rowYs.length; ry++)
-      for (let cx = 0; cx < colXs.length; cx++)
-        all.push({x: colXs[cx], y: rowYs[ry], ci: cx, ri: ry});
+    for (let ri = 0; ri < rowPcts.length; ri++)
+      for (let ci = 0; ci < colPcts.length; ci++)
+        all.push({
+          x: window.innerWidth  * colPcts[ci] / 100,
+          y: window.innerHeight * rowPcts[ri] / 100,
+          ci, ri,
+          isCorner: (ci===0||ci===colPcts.length-1) && (ri===0||ri===rowPcts.length-1),
+        });
+    return [...all.filter(p=>p.isCorner), ...all.filter(p=>!p.isCorner)];
+  }, [cols, rows]);
 
-    const isCorner = p => (p.ci===0||p.ci===colXs.length-1) && (p.ri===0||p.ri===rowYs.length-1);
-    return [...all.filter(isCorner), ...all.filter(p=>!isCorner(p))];
-  }, [allRects, cols, rows]);
+  // CalibrationScreen과 동일한 셀 크기 계산
+  const cellSize = React.useMemo(() => {
+    const headerH = 110, btnH = 60, gap = 8, pad = 8;
+    const gridW = window.innerWidth  - pad * 2;
+    const gridH = window.innerHeight - headerH - btnH - pad * 2;
+    const cw = (gridW - gap * 2) / 3;
+    const ch = (gridH - gap * 2) / 3;
+    return Math.min(cw, ch);
+  }, []);
 
   const [cur,      setCur]      = React.useState(0);
   const [phase,    setPhase]    = React.useState('intro');
   const [progress, setProgress] = React.useState(0);
   const INTRO_MS = 700, HOLD_MS = 2500;
   const R = 36, C = 2 * Math.PI * R;
-
-  // 평균 패드 크기 (셀 렌더 크기 추정)
-  const cellSize = React.useMemo(() => {
-    const valid = allRects.filter(Boolean);
-    if (!valid.length) return 120;
-    const avgW = valid.reduce((s,r)=>s+(r.right-r.left),0)/valid.length;
-    const avgH = valid.reduce((s,r)=>s+(r.bottom-r.top),0)/valid.length;
-    return Math.min(avgW, avgH) * 0.85;
-  }, [allRects]);
 
   React.useEffect(() => {
     if (!points.length || cur >= points.length) { onDone(); return; }
@@ -575,13 +569,10 @@ function GazePadRecalib({ allRects, cols, rows, onDone }) {
   const pt = points[cur];
   const half = cellSize / 2;
   const dash = C * (1 - progress);
-
-  // 이모지: 모서리=CALIB_ORDER 셀, 나머지 순서대로
   const emojiIdx = cur % EMOJIS_BY_CELL.length;
 
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.68)',zIndex:850,touchAction:'none'}}>
-      {/* 안내 텍스트: intro 단계에서만 */}
+    <div style={{position:'fixed',inset:0,background:'#000',zIndex:850,touchAction:'none'}}>
       {phase === 'intro' && (
         <div style={{position:'absolute',top:24,left:0,right:0,textAlign:'center',pointerEvents:'none',animation:'fadeIn 0.4s ease-out'}}>
           <div style={{color:'#fff',fontWeight:800,fontSize:16}}>👁️ 빛나는 곳을 바라봐 주세요</div>
@@ -589,7 +580,6 @@ function GazePadRecalib({ allRects, cols, rows, onDone }) {
         </div>
       )}
 
-      {/* calibrating: CalibrationScreen active cell 동일 스타일, 교차점 중심 */}
       {phase === 'calibrating' && (
         <div style={{
           position:'absolute',
@@ -617,10 +607,10 @@ function GazePadRecalib({ allRects, cols, rows, onDone }) {
       )}
 
       <button onPointerDown={onDone} style={{
-        position:'absolute', bottom:32, left:'50%', transform:'translateX(-50%)',
-        padding:'8px 28px', borderRadius:50,
-        border:'1px solid #333', background:'transparent', color:'#444',
-        fontSize:12, cursor:'pointer',
+        position:'absolute', bottom:14, left:'50%', transform:'translateX(-50%)',
+        padding:'10px 32px', borderRadius:50,
+        border:'1px solid #2a2a3e', background:'transparent', color:'#555',
+        fontSize:13, cursor:'pointer',
       }}>건너뛰기</button>
     </div>
   );
@@ -669,7 +659,7 @@ function GazeStartModal({ savedAt, screenW, screenH, orientation, onNew, onLoad,
         <div style={{color:statusColor,fontSize:11,marginTop:4}}>{statusMsg}</div>
       </div>
       <div style={{display:'flex',flexDirection:'column',gap:10}}>
-        <button onClick={onLoad} style={{padding:'13px 0',borderRadius:12,border:'none',background:'linear-gradient(135deg,#4CC9F0,#4361EE)',color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer'}}>
+        <button onClick={orientationMismatch ? undefined : onLoad} style={{padding:'13px 0',borderRadius:12,border:'none',background: orientationMismatch ? '#1a1a2e' : 'linear-gradient(135deg,#4CC9F0,#4361EE)',color: orientationMismatch ? '#444' : '#fff',fontWeight:700,fontSize:14,cursor: orientationMismatch ? 'default' : 'pointer',opacity: orientationMismatch ? 0.5 : 1}}>
           ⚡ 저장된 캘리브레이션 사용
         </button>
         <button onClick={onNew} style={{padding:'13px 0',borderRadius:12,border:'1px solid #2a2a3e',background:'#1a1a2e',color:'#aaa',fontWeight:700,fontSize:14,cursor:'pointer'}}>
@@ -1434,7 +1424,7 @@ function App() {
   const [gazeAutoRecalib,setGazeAutoRecalib]= useState(false);
   const [gazePadRecalib, setGazePadRecalib] = useState(false);
   const gazeModeRef    = useRef(false);
-  const gazeHoverRef   = useRef({idx:null, timerId:null, lastPlayIdx:null, exitCount:0, dwellAttempts:0, dwellSuccesses:0});
+  const gazeHoverRef   = useRef({idx:null, timerId:null, lastPlayIdx:null, exitCount:0});
   const padRectsRef    = useRef([]);
   const gazeSmoothRef  = useRef({x: null, y: null});
   const gazeCalibRef   = useRef(false);
@@ -1447,7 +1437,6 @@ function App() {
   const gazeCornerRef    = useRef({corner:null, since:null, notified:false}); // quick recalib
   const gazeStartTimeRef = useRef(null);                   // auto-reminder
   const nystagmusModeRef = useRef(false);
-  const adaptiveDwellRef = useRef(1000);
   const gazeInitRef      = useRef(false);
   const gazeStableRef    = useRef({idx:null, count:0});
   const gazeGlobalCooldownRef = useRef(0); // 재생 후 전역 쿨다운 타임스탬프
@@ -1843,7 +1832,6 @@ function App() {
     gazeVarianceRef.current = {samples:[], variance:0};
     gazeCornerRef.current = {corner:null, since:null, notified:false};
     gazeStartTimeRef.current = null;
-    adaptiveDwellRef.current = dwellMsRef.current;
     setGazeMode(false);
     setGazeCalib(false);
     setGazeLoading(false);
@@ -2093,6 +2081,8 @@ function App() {
   }, [startGazeEngine, gazeLoading, gazeMode]);
 
   const handleGazeLoadSaved = useCallback(async () => {
+    unlockAudioPool(); // 유저 제스처 컨텍스트에서 Audio pool 확보
+    resumeAudioCtx();
     const saved = gazeStartModal;
     setGazeStartModal(null);
     try {
@@ -2139,6 +2129,7 @@ function App() {
 
   const handlePadRecalibDone = useCallback(() => {
     setGazePadRecalib(false);
+    resumeAudioCtx(); // suspended 상태 복구
     setGazeMode(true);
     gazeModeRef.current = true;
     gazeStartTimeRef.current = Date.now();
@@ -2284,10 +2275,6 @@ function App() {
           for (let k = 0; k < 3; k++) {
             try { window.webgazer?.recordScreenPosition(cx, cy, 'click'); } catch {}
           }
-          // 직접 탭 = dwell 성공으로 카운트
-          const gh = gazeHoverRef.current;
-          gh.dwellSuccesses = (gh.dwellSuccesses || 0) + 1;
-          gh.dwellAttempts  = (gh.dwellAttempts  || 0) + 1;
         }
       }
       playPad(idx); return;
@@ -2520,7 +2507,7 @@ function App() {
       {gazeLoading&&<GazeLoadingScreen onCancel={stopGaze} />}
       {gazeCalib&&<CalibrationScreen onDone={handleGazeCalibDone} onCancel={stopGaze} onCalibClick={(x,y)=>{ calibPtsRef.current.push([x,y]); }} />}
       {gazeAutoRecalib&&<GazeAutoRecalib onDone={handleAutoRecalibDone} />}
-      {gazePadRecalib&&<GazePadRecalib allRects={padRectsRef.current} cols={cols} rows={rows} onDone={handlePadRecalibDone} />}
+      {gazePadRecalib&&<GazePadRecalib cols={cols} rows={rows} onDone={handlePadRecalibDone} />}
     </div>
   );
 }
