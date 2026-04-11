@@ -344,10 +344,7 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
         <div style={{color:'#aaa',fontSize:13,marginTop:4}}>
           {phase==='intro'     && <span style={{animation:'fadeIn 0.4s ease-out'}}>화면을 바라보며 준비하세요</span>}
           {phase==='countdown' && '준비하세요 — 곧 자동으로 시작됩니다'}
-          {phase==='calibrating' && <>
-            <span style={{color:'#FFD60A',fontWeight:700}}>빛나는 패드</span>를 바라보세요
-            <span style={{color:'#555'}}> ({cur+1} / {maxPts})</span>
-          </>}
+          {phase==='calibrating' && <span style={{color:'#555'}}>({cur+1} / {maxPts})</span>}
           {phase==='verifying' && (accuracy === null
             ? '화면 중앙을 바라봐 주세요'
             : accuracy <= ACCURACY_THRESHOLD
@@ -458,29 +455,35 @@ function GazeAutoRecalib({ onDone }) {
     return () => cancelAnimationFrame(rafRef.current);
   }, [phase]);
 
-  const SIZE = 90, R = 36, C = 2 * Math.PI * R;
+  const R = 36, C = 2 * Math.PI * R;
   const dash = C * (1 - progress);
+  // CalibrationScreen active cell과 동일한 크기/비율로 중앙에 표시
+  const CELL_SIZE = Math.min(window.innerWidth, window.innerHeight) * 0.38;
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.68)',zIndex:850,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16,touchAction:'none'}}>
-      {/* 텍스트: 항상 표시 */}
-      <div style={{color:'#fff',fontWeight:800,fontSize:16,animation:'fadeIn 0.4s ease-out'}}>👁️ 화면 중앙을 바라봐 주세요</div>
-      <div style={{color:'#aaa',fontSize:13}}>1 / 1</div>
+      {phase === 'intro' && <div style={{color:'#fff',fontWeight:800,fontSize:16,animation:'fadeIn 0.4s ease-out'}}>👁️ 화면 중앙을 바라봐 주세요</div>}
+      {phase === 'intro' && <div style={{color:'#aaa',fontSize:13}}>1 / 1</div>}
 
-      {/* 링: calibrating 단계에서만 표시 */}
+      {/* calibrating: CalibrationScreen active cell 동일 스타일 */}
       {phase === 'calibrating' && (
-        <div style={{position:'relative',width:SIZE,height:SIZE,animation:'fadeIn 0.3s ease-out'}}>
-          <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
-            <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="rgba(255,214,10,0.2)" strokeWidth="6"/>
-            <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="#FFD60A" strokeWidth="6"
-              strokeDasharray={`${C - dash} ${dash}`}
-              strokeLinecap="round"
-              transform={`rotate(-90 ${SIZE/2} ${SIZE/2})`}
-              style={{transition:'stroke-dasharray 0.05s linear'}}
-            />
+        <div style={{
+          width: CELL_SIZE, height: CELL_SIZE, borderRadius: 20,
+          background: 'rgba(255,214,10,0.18)',
+          border: '3px solid #FFD60A',
+          boxShadow: '0 0 48px rgba(255,214,10,0.7), inset 0 0 30px rgba(255,214,10,0.12)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          position: 'relative', overflow: 'hidden',
+          animation: 'fadeIn 0.3s ease-out',
+        }}>
+          <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r={R} fill="none" stroke="rgba(255,214,10,0.15)" strokeWidth="6"/>
+            <circle cx="50" cy="50" r={R} fill="none" stroke="#FFD60A" strokeWidth="6"
+              strokeDasharray={`${C - dash} ${dash}`} strokeLinecap="round"
+              transform="rotate(-90 50 50)" style={{transition:'stroke-dasharray 0.05s linear'}}/>
           </svg>
-          <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <div style={{width:14,height:14,borderRadius:'50%',background:'#FFD60A',boxShadow:'0 0 18px rgba(255,214,10,1)',animation:'pulse 0.8s ease-in-out infinite'}} />
-          </div>
+          <span style={{fontSize:52,lineHeight:1,filter:'drop-shadow(0 0 12px rgba(255,214,10,0.9))',animation:'pulse 0.7s ease-in-out infinite',position:'relative',zIndex:1}}>
+            {EMOJIS_BY_CELL[4]}
+          </span>
         </div>
       )}
 
@@ -490,28 +493,65 @@ function GazeAutoRecalib({ onDone }) {
 }
 
 // ── GazePadRecalib ────────────────────────────────────────────
-// 저장된 캘리브레이션 불러온 후 패드 위치 n개를 순서대로 보정
-function GazePadRecalib({ padRects, onDone }) {
+// 열별 X, 행별 Y 교차점을 순서대로 보정 (새 캘리브레이션과 동일 위치 커버)
+function GazePadRecalib({ allRects, cols, rows, onDone }) {
+  // 열별 centerX, 행별 centerY 계산
+  const points = React.useMemo(() => {
+    const colXs = Array.from({length: cols}, (_, c) => {
+      const xs = [];
+      for (let r = 0; r < rows; r++) {
+        const rect = allRects[r * cols + c];
+        if (rect) xs.push((rect.left + rect.right) / 2);
+      }
+      return xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : null;
+    }).filter(x => x !== null);
+
+    const rowYs = Array.from({length: rows}, (_, r) => {
+      const ys = [];
+      for (let c = 0; c < cols; c++) {
+        const rect = allRects[r * cols + c];
+        if (rect) ys.push((rect.top + rect.bottom) / 2);
+      }
+      return ys.length ? ys.reduce((a,b)=>a+b,0)/ys.length : null;
+    }).filter(y => y !== null);
+
+    // 순서: 모서리 먼저 (TL→TR→BL→BR), 나머지는 좌→우, 위→아래
+    const all = [];
+    for (let ry = 0; ry < rowYs.length; ry++)
+      for (let cx = 0; cx < colXs.length; cx++)
+        all.push({x: colXs[cx], y: rowYs[ry], ci: cx, ri: ry});
+
+    const isCorner = p => (p.ci===0||p.ci===colXs.length-1) && (p.ri===0||p.ri===rowYs.length-1);
+    return [...all.filter(isCorner), ...all.filter(p=>!isCorner(p))];
+  }, [allRects, cols, rows]);
+
   const [cur,      setCur]      = React.useState(0);
-  const [phase,    setPhase]    = React.useState('intro'); // 'intro' | 'calibrating'
+  const [phase,    setPhase]    = React.useState('intro');
   const [progress, setProgress] = React.useState(0);
   const INTRO_MS = 700, HOLD_MS = 2500;
-  const SIZE = 90, R = 36, C = 2 * Math.PI * R;
+  const R = 36, C = 2 * Math.PI * R;
 
-  // cur 바뀔 때마다 intro 리셋
+  // 평균 패드 크기 (셀 렌더 크기 추정)
+  const cellSize = React.useMemo(() => {
+    const valid = allRects.filter(Boolean);
+    if (!valid.length) return 120;
+    const avgW = valid.reduce((s,r)=>s+(r.right-r.left),0)/valid.length;
+    const avgH = valid.reduce((s,r)=>s+(r.bottom-r.top),0)/valid.length;
+    return Math.min(avgW, avgH) * 0.85;
+  }, [allRects]);
+
   React.useEffect(() => {
-    if (!padRects.length || cur >= padRects.length) { onDone(); return; }
+    if (!points.length || cur >= points.length) { onDone(); return; }
     setPhase('intro');
     setProgress(0);
-  }, [cur]);
+  }, [cur, points.length]);
 
   React.useEffect(() => {
-    if (!padRects.length || cur >= padRects.length) return;
+    if (!points.length || cur >= points.length) return;
     if (phase === 'intro') {
       const t = setTimeout(() => setPhase('calibrating'), INTRO_MS);
       return () => clearTimeout(t);
     }
-    // calibrating
     let raf;
     const start = performance.now();
     const animate = (now) => {
@@ -519,70 +559,62 @@ function GazePadRecalib({ padRects, onDone }) {
       setProgress(p);
       if (p < 1) { raf = requestAnimationFrame(animate); }
       else {
-        const r = padRects[cur];
-        const cx = (r.left + r.right) / 2;
-        const cy = (r.top  + r.bottom) / 2;
+        const pt = points[cur];
         for (let k = 0; k < 8; k++) {
-          try { window.webgazer?.recordScreenPosition(cx, cy, 'click'); } catch {}
+          try { window.webgazer?.recordScreenPosition(pt.x, pt.y, 'click'); } catch {}
         }
         setCur(c => c + 1);
       }
     };
     raf = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(raf);
-  }, [phase, cur]);
+  }, [phase, cur, points]);
 
-  if (!padRects.length || cur >= padRects.length) return null;
+  if (!points.length || cur >= points.length) return null;
 
-  const r = padRects[cur];
-  const cx = (r.left + r.right) / 2;
-  const cy = (r.top  + r.bottom) / 2;
+  const pt = points[cur];
+  const half = cellSize / 2;
   const dash = C * (1 - progress);
+
+  // 이모지: 모서리=CALIB_ORDER 셀, 나머지 순서대로
+  const emojiIdx = cur % EMOJIS_BY_CELL.length;
 
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.68)',zIndex:850,touchAction:'none'}}>
-      {/* 안내 텍스트: 항상 표시 */}
-      <div style={{position:'absolute',top:24,left:0,right:0,textAlign:'center',pointerEvents:'none',animation:'fadeIn 0.4s ease-out'}}>
-        <div style={{color:'#fff',fontWeight:800,fontSize:16}}>👁️ 패드를 바라봐 주세요</div>
-        <div style={{color:'#aaa',fontSize:13,marginTop:4}}>{cur + 1} / {padRects.length}</div>
-      </div>
-
-      {/* 하이라이트 + 링: calibrating 단계에서만 표시 */}
-      {phase === 'calibrating' && (<>
-        {/* 대상 패드 하이라이트 테두리 */}
-        <div style={{
-          position:'absolute',
-          left: r.left - 4, top: r.top - 4,
-          width: r.right - r.left + 8, height: r.bottom - r.top + 8,
-          border:'3px solid #FFD60A',
-          borderRadius:18,
-          boxShadow:'0 0 32px rgba(255,214,10,0.55)',
-          pointerEvents:'none',
-          animation:'fadeIn 0.3s ease-out',
-        }} />
-
-        {/* 중앙 원형 프로그레스 */}
-        <div style={{
-          position:'absolute',
-          left: cx - SIZE/2, top: cy - SIZE/2,
-          width: SIZE, height: SIZE,
-          pointerEvents:'none',
-          animation:'fadeIn 0.3s ease-out',
-        }}>
-          <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
-            <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="rgba(255,214,10,0.2)" strokeWidth="6"/>
-            <circle cx={SIZE/2} cy={SIZE/2} r={R} fill="none" stroke="#FFD60A" strokeWidth="6"
-              strokeDasharray={`${C - dash} ${dash}`}
-              strokeLinecap="round"
-              transform={`rotate(-90 ${SIZE/2} ${SIZE/2})`}
-              style={{transition:'stroke-dasharray 0.05s linear'}}
-            />
-          </svg>
-          <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
-            <div style={{width:14,height:14,borderRadius:'50%',background:'#FFD60A',boxShadow:'0 0 18px rgba(255,214,10,1)',animation:'pulse 0.8s ease-in-out infinite'}} />
-          </div>
+      {/* 안내 텍스트: intro 단계에서만 */}
+      {phase === 'intro' && (
+        <div style={{position:'absolute',top:24,left:0,right:0,textAlign:'center',pointerEvents:'none',animation:'fadeIn 0.4s ease-out'}}>
+          <div style={{color:'#fff',fontWeight:800,fontSize:16}}>👁️ 빛나는 곳을 바라봐 주세요</div>
+          <div style={{color:'#aaa',fontSize:13,marginTop:4}}>{cur + 1} / {points.length}</div>
         </div>
-      </>)}
+      )}
+
+      {/* calibrating: CalibrationScreen active cell 동일 스타일, 교차점 중심 */}
+      {phase === 'calibrating' && (
+        <div style={{
+          position:'absolute',
+          left: pt.x - half, top: pt.y - half,
+          width: cellSize, height: cellSize,
+          borderRadius: 20,
+          background: 'rgba(255,214,10,0.18)',
+          border: '3px solid #FFD60A',
+          boxShadow: '0 0 48px rgba(255,214,10,0.7), inset 0 0 30px rgba(255,214,10,0.12)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none',
+          animation: 'fadeIn 0.3s ease-out',
+          overflow: 'hidden',
+        }}>
+          <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r={R} fill="none" stroke="rgba(255,214,10,0.15)" strokeWidth="6"/>
+            <circle cx="50" cy="50" r={R} fill="none" stroke="#FFD60A" strokeWidth="6"
+              strokeDasharray={`${C - dash} ${dash}`} strokeLinecap="round"
+              transform="rotate(-90 50 50)" style={{transition:'stroke-dasharray 0.05s linear'}}/>
+          </svg>
+          <span style={{fontSize: cellSize * 0.42, lineHeight:1, filter:'drop-shadow(0 0 12px rgba(255,214,10,0.9))', animation:'pulse 0.7s ease-in-out infinite', position:'relative', zIndex:1}}>
+            {EMOJIS_BY_CELL[emojiIdx]}
+          </span>
+        </div>
+      )}
 
       <button onPointerDown={onDone} style={{
         position:'absolute', bottom:32, left:'50%', transform:'translateX(-50%)',
@@ -2488,7 +2520,7 @@ function App() {
       {gazeLoading&&<GazeLoadingScreen onCancel={stopGaze} />}
       {gazeCalib&&<CalibrationScreen onDone={handleGazeCalibDone} onCancel={stopGaze} onCalibClick={(x,y)=>{ calibPtsRef.current.push([x,y]); }} />}
       {gazeAutoRecalib&&<GazeAutoRecalib onDone={handleAutoRecalibDone} />}
-      {gazePadRecalib&&<GazePadRecalib padRects={padRectsRef.current.filter(Boolean)} onDone={handlePadRecalibDone} />}
+      {gazePadRecalib&&<GazePadRecalib allRects={padRectsRef.current} cols={cols} rows={rows} onDone={handlePadRecalibDone} />}
     </div>
   );
 }
