@@ -589,9 +589,9 @@ function GazePadRecalib({ cols, rows, onDone }) {
   return (
     <div style={{position:'fixed',inset:0,background:'#000',zIndex:850,touchAction:'none'}}>
       {phase === 'intro' && (
-        <div style={{position:'absolute',top:24,left:0,right:0,textAlign:'center',pointerEvents:'none',animation:'fadeIn 0.4s ease-out'}}>
-          <div style={{color:'#fff',fontWeight:800,fontSize:16}}>👁️ 빛나는 곳을 바라봐 주세요</div>
-          <div style={{color:'#aaa',fontSize:13,marginTop:4}}>{cur + 1} / {points.length}</div>
+        <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',pointerEvents:'none',animation:'fadeIn 0.4s ease-out'}}>
+          <div style={{color:'#fff',fontWeight:800,fontSize:18}}>👁️ 빛나는 곳을 바라봐 주세요</div>
+          <div style={{color:'#aaa',fontSize:13,marginTop:8}}>{cur + 1} / {points.length}</div>
         </div>
       )}
 
@@ -1476,6 +1476,7 @@ function App() {
   const [gazeStartModal, setGazeStartModal] = useState(null);
   const [gazeAutoRecalib,setGazeAutoRecalib]= useState(false);
   const [gazePadRecalib, setGazePadRecalib] = useState(false);
+  const [gazeReadyPrompt,setGazeReadyPrompt]= useState(false);
   const gazeModeRef    = useRef(false);
   const gazeHoverRef   = useRef({idx:null, timerId:null, lastPlayIdx:null, exitCount:0});
   const padRectsRef    = useRef([]);
@@ -1909,14 +1910,12 @@ function App() {
     setGazeMode(false);
     setGazeCalib(false);
     setGazeLoading(false);
+    setGazeReadyPrompt(false);
   }, []);
 
   const handleGazeCalibDone = useCallback(async () => {
     setGazeCalib(false);
     gazeCalibRef.current = false;
-    setGazeMode(true);
-    gazeModeRef.current = true;
-    gazeStartTimeRef.current = Date.now();
     // 캘리브레이션 포인트 DB 저장
     try {
       await dbPut('gaze_calibration', {
@@ -1928,7 +1927,7 @@ function App() {
       });
     } catch(e) { console.error('calib save:', e); }
     calibPtsRef.current = [];
-    // 패드 위치에 추가 캘리브레이션 포인트 등록 (2×2 정확도 향상)
+    // 패드 위치에 추가 캘리브레이션 포인트 등록
     setTimeout(() => {
       const rects = padRectsRef.current;
       rects.forEach(r => {
@@ -1941,6 +1940,8 @@ function App() {
       });
     }, 200);
     setTimeout(updatePadRects, 150);
+    // gaze 모드 진입 대신 ready prompt 표시 (user gesture로 오디오 unlock 보장)
+    setGazeReadyPrompt(true);
   }, [updatePadRects]);
 
   const applyCalibPoints = useCallback((points, srcW, srcH, srcOrientation) => {
@@ -2208,17 +2209,24 @@ function App() {
 
   const handlePadRecalibDone = useCallback(() => {
     setGazePadRecalib(false);
-    resumeAudioCtx(); // suspended 상태 복구
-    setGazeMode(true);
-    gazeModeRef.current = true;
-    gazeStartTimeRef.current = Date.now();
-    showToast('✅ 보정 완료');
+    // gaze 모드 진입 대신 ready prompt 표시 (user gesture로 오디오 unlock 보장)
+    setGazeReadyPrompt(true);
   }, []);
 
   const handleGazeDeleteSaved = useCallback(async () => {
     await dbDel('gaze_calibration');
     setGazeStartModal(null);
     showToast('캘리브레이션 데이터를 삭제했습니다');
+  }, []);
+
+  const handleGazeReady = useCallback(() => {
+    setGazeReadyPrompt(false);
+    unlockAudioPool();
+    resumeAudioCtx();
+    setGazeMode(true);
+    gazeModeRef.current = true;
+    gazeStartTimeRef.current = Date.now();
+    showToast('✅ 시선 모드 시작');
   }, []);
 
   // ── Delete ────────────────────────────────────────────────────
@@ -2590,6 +2598,14 @@ function App() {
       {gazeCalib&&<CalibrationScreen onDone={handleGazeCalibDone} onCancel={stopGaze} onCalibClick={(x,y)=>{ calibPtsRef.current.push([x,y]); }} />}
       {gazeAutoRecalib&&<GazeAutoRecalib onDone={handleAutoRecalibDone} />}
       {gazePadRecalib&&<GazePadRecalib cols={cols} rows={rows} onDone={handlePadRecalibDone} />}
+      {gazeReadyPrompt&&(
+        <div onPointerDown={handleGazeReady} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',zIndex:860,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20,cursor:'pointer',touchAction:'none'}}>
+          <div style={{fontSize:56}}>👁️</div>
+          <div style={{color:'#fff',fontWeight:800,fontSize:18}}>보정 완료</div>
+          <div style={{color:'#aaa',fontSize:14}}>화면을 탭하여 시선 모드를 시작하세요</div>
+          <div style={{marginTop:16,padding:'14px 40px',borderRadius:50,background:'linear-gradient(135deg,#4CC9F0,#4361EE)',color:'#fff',fontWeight:700,fontSize:15,boxShadow:'0 0 24px rgba(76,201,240,0.5)'}}>👆 탭하여 시작</div>
+        </div>
+      )}
     </div>
   );
 }
