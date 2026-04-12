@@ -13,7 +13,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/jspsych/jspsych@jspsych@7.0.0/examples/js/webgazer/webgazer.js" onerror="window._webgazerLoadFailed=true"></script>
+<script src="https://cdn.jsdelivr.net/npm/webgazer@2.1.0/dist/webgazer.min.js" onerror="window._webgazerLoadFailed=true"></script>
 <style>
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; margin:0; padding:0; }
   body { background:#0A0A0F; font-family:'Segoe UI',system-ui,sans-serif; user-select:none; overflow:hidden; height:100dvh; }
@@ -273,23 +273,25 @@ function CalibrationScreen({ onDone, onCancel, onCalibClick }) {
     }, 120);
     setTimeout(() => {
       clearInterval(collect);
-      if (preds.current.length === 0 || maxPts >= 9) {
-        // 예측 없거나 이미 전체 캘리브 완료 → 무조건 종료
-        onDone(); return;
-      }
-      const mx = preds.current.reduce((s,p)=>s+p.x,0)/preds.current.length;
-      const my = preds.current.reduce((s,p)=>s+p.y,0)/preds.current.length;
-      const ex = window.innerWidth  * 50 / 100;
-      const ey = window.innerHeight * 50 / 100;
-      const err = Math.round(Math.hypot(mx-ex, my-ey));
-      setAccuracy(err);
+      // Promise 해소 대기 후 평가
       setTimeout(() => {
-        if (err <= ACCURACY_THRESHOLD() || maxPts >= 9) {
-          onDone(); // 정확 or 이미 전체 완료 → 종료
-        } else {
-          setMaxPts(9); setCur(5); setPhase('calibrating'); // 엣지 추가
+        if (preds.current.length === 0 || maxPts >= 9) {
+          onDone(); return;
         }
-      }, 1200);
+        const mx = preds.current.reduce((s,p)=>s+p.x,0)/preds.current.length;
+        const my = preds.current.reduce((s,p)=>s+p.y,0)/preds.current.length;
+        const ex = window.innerWidth  * 50 / 100;
+        const ey = window.innerHeight * 50 / 100;
+        const err = Math.round(Math.hypot(mx-ex, my-ey));
+        setAccuracy(err);
+        setTimeout(() => {
+          if (err <= ACCURACY_THRESHOLD() || maxPts >= 9) {
+            onDone();
+          } else {
+            setMaxPts(9); setCur(5); setPhase('calibrating');
+          }
+        }, 1200);
+      }, 300);
     }, 1500);
   }, [onDone, maxPts]);
 
@@ -1320,6 +1322,24 @@ function Settings({ open, onClose, cfg, set, onReset }) {
         </div>
       </div>
 
+      {/* 전체 볼륨 */}
+      <div style={{ marginBottom:24 }}>
+        <div style={{ display:'flex',justifyContent:'space-between',marginBottom:10 }}>
+          <span style={sec}>🔊 전체 볼륨</span>
+          <span style={{ color:'#4CC9F0',fontSize:12,fontWeight:700 }}>{Math.round(globalVolume*100)}%</span>
+        </div>
+        <input type="range" min={0} max={1} step={0.05} value={globalVolume} onChange={e=>set('globalVolume',+e.target.value)} />
+      </div>
+
+      {/* 카메라 방향 */}
+      <div style={{ marginBottom:24 }}>
+        <div style={sec}>📷 카메라 방향</div>
+        <div style={{ display:'flex',gap:8 }}>
+          <button style={sBtn(cameraFacing==='user')} onClick={()=>set('cameraFacing','user')}>🤳 전면</button>
+          <button style={sBtn(cameraFacing==='environment')} onClick={()=>set('cameraFacing','environment')}>🌍 후면</button>
+        </div>
+      </div>
+
       {/* 시선 응시 시간 */}
       <div style={{ marginBottom:32 }}>
         <div style={sec}>👁️ 시선 응시 시간 (Dwell)</div>
@@ -1453,6 +1473,7 @@ function App() {
   useEffect(() => { gazeCalibRef.current = gazeCalib; }, [gazeCalib]);
   useEffect(() => { playKeysRef.current = playKeys; }, [playKeys]);
   useEffect(() => { nystagmusModeRef.current = nystagmusMode; }, [nystagmusMode]);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
 
   // 화면 복귀 시 WebGazer resume
   useEffect(() => {
@@ -1476,7 +1497,12 @@ function App() {
       nystagmusMode:nystagmusModeRef.current, padMeta
     });
     await Promise.all(curPads.map(async (p,i) => {
-      if (p?.url) { const blob = await fetch(p.url).then(r=>r.blob()); await dbPut(`blob_${i}`, blob); }
+      if (p?.url) {
+        // iOS Safari에서 objectURL fetch 실패 방지: DB에 이미 있으면 재사용
+        let blob = await dbGet(`blob_${i}`).catch(() => null);
+        if (!blob) blob = await fetch(p.url).then(r=>r.blob());
+        await dbPut(`blob_${i}`, blob);
+      }
       else await dbDel(`blob_${i}`);
     }));
   };
@@ -1898,7 +1924,11 @@ function App() {
 
   const startGazeEngine = useCallback(async (onReady) => {
     if (gazeObsRef.current) gazeObsRef.current.disconnect();
-    const obs = new MutationObserver(() => hideWebgazerEls());
+    let obsTimer = null;
+    const obs = new MutationObserver(() => {
+      if (obsTimer) return;
+      obsTimer = setTimeout(() => { obsTimer = null; hideWebgazerEls(); }, 200);
+    });
     obs.observe(document.body, {childList:true, subtree:true, attributes:true, attributeFilter:['style']});
     gazeObsRef.current = obs;
 
@@ -1911,9 +1941,10 @@ function App() {
         }
         if (!data) return;
 
-        // Saccade Rejection
+        // Saccade Rejection (화면 크기 비율 기반)
         const prev = gazePrevRef.current;
-        if (prev.x !== null && Math.hypot(data.x-prev.x, data.y-prev.y) > 250) {
+        const saccadeThreshold = Math.max(window.innerWidth, window.innerHeight) * 0.18;
+        if (prev.x !== null && Math.hypot(data.x-prev.x, data.y-prev.y) > saccadeThreshold) {
           gazePrevRef.current = {x:data.x, y:data.y}; return;
         }
         gazePrevRef.current = {x:data.x, y:data.y};
