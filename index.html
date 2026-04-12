@@ -32,6 +32,8 @@
   #gaze-dot::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#4CC9F0;box-shadow:0 0 10px #4CC9F0}
   .dwell-ring{position:absolute;inset:0;pointer-events:none;z-index:20;border-radius:14px;overflow:hidden}
   .dwell-ring svg{position:absolute;inset:0;width:100%;height:100%}
+  [data-pi]:focus{outline:none}
+  [data-pi]:focus-visible{outline:3px solid #4CC9F0;outline-offset:2px}
   #webgazerVideoFeed,#webgazerFaceOverlay,#webgazerFaceFeedbackBox,#webgazerVideoContainerElement{display:none!important;width:1px!important;height:1px!important;opacity:0!important}
   #webgazerGazeDot{display:none!important;opacity:0!important;pointer-events:none!important}
 </style>
@@ -93,6 +95,17 @@ function resizeImage(file, cb) {
     img.src = ev.target.result;
   };
   reader.readAsDataURL(file);
+}
+
+// ── Hooks ─────────────────────────────────────────────────────
+function useDragToClose(open, onClose) {
+  const dg = useRef({on:false,y0:0,dy:0});
+  const [ty, setTy] = useState(0);
+  useEffect(() => { if (open) setTy(0); }, [open]);
+  const hDown = useCallback(e => { dg.current={on:true,y0:e.clientY||e.touches?.[0]?.clientY||0,dy:0}; }, []);
+  const hMove = useCallback(e => { if(!dg.current.on) return; const y=Math.max(0,(e.clientY||e.touches?.[0]?.clientY||0)-dg.current.y0); dg.current.dy=y; setTy(y); }, []);
+  const hUp = useCallback(() => { if(!dg.current.on) return; dg.current.on=false; if(dg.current.dy>120){onClose();setTy(0);}else setTy(0); }, [onClose]);
+  return { ty, dg, hDown, hMove, hUp };
 }
 
 // ── Components ────────────────────────────────────────────────
@@ -866,7 +879,42 @@ function TrimModal({ file, recType, padIdx, maxRecMs, onDone, onClose }) {
         await ctx.close();
         onDone(blob, 'audio');
       } else {
-        onDone(file, 'video', startSec, endSec);
+        // 영상: captureStream으로 구간만 재인코딩 (용량 절약)
+        const trimVid = document.createElement('video');
+        trimVid.src = fileUrl;
+        trimVid.muted = false;
+        trimVid.playsInline = true;
+        trimVid.currentTime = startSec;
+        await new Promise(r => { trimVid.onseeked = r; });
+        const stream = trimVid.captureStream ? trimVid.captureStream() : trimVid.mozCaptureStream?.();
+        if (!stream) {
+          // captureStream 미지원 시 기존 방식 fallback
+          onDone(file, 'video', startSec, endSec);
+          return;
+        }
+        const mime = getVideoMime();
+        const mr = new MediaRecorder(stream, mime ? {mimeType:mime} : {});
+        const chunks = [];
+        mr.ondataavailable = ev => { if (ev.data.size > 0) chunks.push(ev.data); };
+        await new Promise((resolve, reject) => {
+          mr.onstop = () => {
+            const blob = new Blob(chunks, {type:'video/webm'});
+            resolve(blob);
+          };
+          mr.onerror = reject;
+          mr.start(100);
+          trimVid.play().catch(reject);
+          trimVid.ontimeupdate = () => {
+            if (trimVid.currentTime >= endSec) {
+              trimVid.pause();
+              mr.stop();
+              stream.getTracks().forEach(t => t.stop());
+            }
+          };
+        }).then(blob => {
+          trimVid.src = '';
+          onDone(blob, 'video');
+        });
       }
     } catch(e) {
       console.error(e);
@@ -892,7 +940,7 @@ function TrimModal({ file, recType, padIdx, maxRecMs, onDone, onClose }) {
         <div style={{ color:'#555',fontSize:11,marginBottom:12,lineHeight:1.6 }}>
           {recType==='audio'
             ? `선택한 구간의 소리만 추출합니다. (최대 ${maxRecMs/1000}초까지 선택 가능)`
-            : `선택한 구간을 패드에 저장합니다. 재생 시 해당 구간만 재생됩니다. (최대 ${maxRecMs/1000}초까지 선택 가능)`}
+            : `선택한 구간만 잘라서 저장합니다. (최대 ${maxRecMs/1000}초까지 선택 가능)`}
         </div>
 
         {/* 시작 슬라이더 */}
@@ -1014,23 +1062,18 @@ function ThumbPromptModal({ padIdx, currentThumb, onSave, onSkip }) {
 
 // ── Config Panel ──────────────────────────────────────────────
 function ConfigPanel({ open, onClose, onSave, onLoad, onDeleteCfg }) {
-  const dg = useRef({on:false,y0:0,dy:0});
-  const [ty, setTy]         = useState(0);
+  const { ty, dg, hDown, hMove, hUp } = useDragToClose(open, onClose);
   const [configs, setConfigs] = useState([]);
   const [nameInput, setName]  = useState('');
   const [saving, setSaving]   = useState(false);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { if (open) { setTy(0); loadList(); } }, [open]);
+  useEffect(() => { if (open) loadList(); }, [open]);
 
   const loadList = async () => {
     const list = await dbGet('cfg_list') || [];
     setConfigs(list);
   };
-
-  const hDown = e => { dg.current={on:true,y0:e.clientY||e.touches?.[0]?.clientY||0,dy:0}; };
-  const hMove = e => { if(!dg.current.on) return; const y=Math.max(0,(e.clientY||e.touches?.[0]?.clientY||0)-dg.current.y0); dg.current.dy=y; setTy(y); };
-  const hUp   = () => { if(!dg.current.on) return; dg.current.on=false; if(dg.current.dy>120){onClose();setTy(0);}else setTy(0); };
 
   const handleSave = async () => {
     const name = nameInput.trim() || `구성 ${configs.length + 1}`;
@@ -1136,12 +1179,7 @@ function ConfigPanel({ open, onClose, onSave, onLoad, onDeleteCfg }) {
 
 // ── Help Panel ────────────────────────────────────────────────
 function HelpPanel({ open, onClose }) {
-  const dg = useRef({on:false,y0:0,dy:0});
-  const [ty, setTy] = useState(0);
-  useEffect(() => { if (open) setTy(0); }, [open]);
-  const hDown = e => { dg.current={on:true,y0:e.clientY||e.touches?.[0]?.clientY||0,dy:0}; };
-  const hMove = e => { if(!dg.current.on) return; const y=Math.max(0,(e.clientY||e.touches?.[0]?.clientY||0)-dg.current.y0); dg.current.dy=y; setTy(y); };
-  const hUp   = () => { if(!dg.current.on) return; dg.current.on=false; if(dg.current.dy>120){onClose();setTy(0);}else setTy(0); };
+  const { ty, dg, hDown, hMove, hUp } = useDragToClose(open, onClose);
   if (!open) return null;
   const sec = { color:'#4CC9F0', fontSize:12, fontWeight:800, letterSpacing:1, marginBottom:12, display:'block' };
   const item = { display:'flex', alignItems:'flex-start', gap:12, marginBottom:14 };
@@ -1167,7 +1205,7 @@ function HelpPanel({ open, onClose }) {
 
       {/* 기본 모드 */}
       <span style={sec}>🔹 기본 모드</span>
-      <div style={item}><span style={icon}>▶️</span><span style={txt}><span style={bold}>재생 모드</span>: 패드를 탭하면 녹화된 영상 또는 소리가 재생됩니다. 여러 패드를 동시에 탭할 수 있어요.</span></div>
+      <div style={item}><span style={icon}>▶️</span><span style={txt}><span style={bold}>재생 모드</span>: 패드를 탭하면 녹화된 영상 또는 소리가 재생됩니다.</span></div>
       <div style={item}><span style={icon}>🔴</span><span style={txt}><span style={bold}>녹화/녹음 모드</span>: 우측 상단 버튼으로 전환합니다. 현재 기록 방식에 따라 버튼이 <span style={bold}>🔴 녹화</span> 또는 <span style={bold}>🎙 녹음</span>으로 표시됩니다.</span></div>
 
       {/* 녹화/녹음 */}
@@ -1252,12 +1290,7 @@ function HelpPanel({ open, onClose }) {
 
 // ── Settings ──────────────────────────────────────────────────
 function Settings({ open, onClose, cfg, set, onReset }) {
-  const dg = useRef({on:false,y0:0,dy:0});
-  const [ty, setTy] = useState(0);
-  useEffect(() => { if (open) setTy(0); }, [open]);
-  const hDown = e => { dg.current={on:true,y0:e.clientY||e.touches?.[0]?.clientY||0,dy:0}; };
-  const hMove = e => { if(!dg.current.on) return; const y=Math.max(0,(e.clientY||e.touches?.[0]?.clientY||0)-dg.current.y0); dg.current.dy=y; setTy(y); };
-  const hUp   = () => { if(!dg.current.on) return; dg.current.on=false; if(dg.current.dy>120){onClose();setTy(0);}else setTy(0); };
+  const { ty, dg, hDown, hMove, hUp } = useDragToClose(open, onClose);
   if (!open) return null;
   const { cols, rows, maxRecMs, globalVolume, cameraFacing, defaultRecType, dwellMs, nystagmusMode } = cfg;
   const sBtn = a => ({ flex:1,padding:'8px 0',borderRadius:8,border:'none',cursor:'pointer',fontWeight:700,fontSize:12,background:a?'#4CC9F0':'#1A1A2E',color:a?'#000':'#555' });
@@ -1475,6 +1508,9 @@ function App() {
   useEffect(() => { nystagmusModeRef.current = nystagmusMode; }, [nystagmusMode]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
+  // padsRef + setPads 동시 업데이트 헬퍼
+  const updatePads = useCallback(np => { padsRef.current = np; setPads([...np]); }, []);
+
   // 화면 복귀 시 WebGazer resume
   useEffect(() => {
     const handle = () => {
@@ -1623,12 +1659,15 @@ function App() {
   };
 
   const handleReset = () => {
-    setConfirm({ msg:'모든 패드를 초기화할까요?\n녹화·녹음된 내용과 저장된 구성이 모두 삭제됩니다.', onOk: async () => {
+    setConfirm({ msg:'모든 패드를 초기화할까요?\n녹화·녹음된 내용과 저장된 구성이 모두 삭제됩니다.\n(시선 캘리브레이션은 유지됩니다)', onOk: async () => {
       setConfirm(null);
       padsRef.current.forEach(p => { if (p?.url) URL.revokeObjectURL(p.url); });
+      // gaze 캘리브레이션 보존
+      const gazeCalibData = await dbGet('gaze_calibration').catch(() => null);
       await dbClear();
+      if (gazeCalibData) await dbPut('gaze_calibration', gazeCalibData);
       const empty = Array(cols*rows).fill(null);
-      padsRef.current = empty; setPads(empty); setPlayKeys({});
+      updatePads(empty); setPlayKeys({});
       setShowSettings(false); showToast('초기화됐습니다');
     }});
   };
@@ -1648,7 +1687,9 @@ function App() {
         } catch(e) { console.error(`cfg blob ${i}:`, e); }
       }
     }));
-    const entry = { id, name, createdAt: Date.now(), cols, rows, padCount: padsRef.current.filter(Boolean).length, padMeta };
+    const entry = { id, name, createdAt: Date.now(), cols, rows, padCount: padsRef.current.filter(Boolean).length, padMeta,
+      maxRecMs: maxRecMsRef.current, globalVolume: globalVolRef.current, cameraFacing: camFacingRef.current,
+      defaultRecType: defRecTypeRef.current, dwellMs: dwellMsRef.current, nystagmusMode: nystagmusModeRef.current };
     const list = await dbGet('cfg_list') || [];
     list.push(entry);
     await dbPut('cfg_list', list);
@@ -1668,7 +1709,14 @@ function App() {
       }
     }
     setCols(c); setRows(r);
-    padsRef.current = np; setPads(np);
+    // 저장된 설정값 복원 (없으면 현재값 유지)
+    if (cfg.maxRecMs)             setMaxRecMs(cfg.maxRecMs);
+    if (cfg.globalVolume !== undefined) setGlobalVolume(cfg.globalVolume);
+    if (cfg.cameraFacing)         setCameraFacing(cfg.cameraFacing);
+    if (cfg.defaultRecType)       setDefaultRecType(cfg.defaultRecType);
+    if (cfg.dwellMs)              setDwellMs(cfg.dwellMs);
+    if (cfg.nystagmusMode !== undefined) setNystagmusMode(cfg.nystagmusMode);
+    updatePads(np);
     setPlayKeys({});
     showToast(`✅ '${cfg.name}' 불러왔습니다`);
   };
@@ -1687,7 +1735,7 @@ function App() {
     setThumbPrompt(null);
     const updated = { ...pad, thumb };
     const np = [...padsRef.current]; np[idx] = updated;
-    padsRef.current = np; setPads([...np]);
+    updatePads(np);
     autoSave(np);
   };
 
@@ -1739,7 +1787,7 @@ function App() {
 
       const newPad = { url, thumb, label:old?.label||'', volume:old?.volume??1, recType };
       const np = [...padsRef.current]; np[idx] = newPad;
-      padsRef.current = np; setPads([...np]);
+      updatePads(np);
       stream.getTracks().forEach(t=>t.stop()); streamRef.current = null;
       setCamReady(false); setCountdown(null); setRecIdx(null); setRecProg(0);
       clearInterval(progTimerRef.current);
@@ -2184,7 +2232,7 @@ function App() {
         setConfirm(null); stopPad(idx);
         if (padsRef.current[idx]?.url) URL.revokeObjectURL(padsRef.current[idx].url);
         const np = [...padsRef.current]; np[idx] = null;
-        padsRef.current = np; setPads([...np]); autoSave(np);
+        updatePads(np); autoSave(np);
       }
     });
   };
@@ -2194,7 +2242,7 @@ function App() {
   const saveEdit  = (label, volume, thumb) => {
     const {idx} = editPad;
     const np = [...padsRef.current];
-    if (np[idx]) { np[idx] = {...np[idx], label, volume, thumb}; padsRef.current = np; setPads([...np]); autoSave(np); }
+    if (np[idx]) { np[idx] = {...np[idx], label, volume, thumb}; updatePads(np); autoSave(np); }
     setEditPad(null);
   };
 
@@ -2237,7 +2285,7 @@ function App() {
     const newPad = { url, thumb, label:old?.label||'', volume:old?.volume??1, recType,
       ...(startSec !== undefined ? { trimStart:startSec, trimEnd:endSec } : {}) };
     const np = [...padsRef.current]; np[idx] = newPad;
-    padsRef.current = np; setPads([...np]);
+    updatePads(np);
 
     if (recType === 'audio') {
       setThumbPrompt({ idx, pad: newPad });
@@ -2273,7 +2321,7 @@ function App() {
       if (pidx !== null && pidx !== dragFrom) {
         const np = [...padsRef.current];
         [np[dragFrom], np[pidx]] = [np[pidx], np[dragFrom]];
-        padsRef.current = np; setPads([...np]); autoSave(np, true);
+        updatePads(np); autoSave(np, true);
       }
       dragActiveRef.current = false;
       try { e.target.releasePointerCapture?.(e.pointerId); } catch {}
@@ -2350,7 +2398,6 @@ function App() {
           <button onClick={()=>setShowSettings(true)} style={{ width:38,height:38,borderRadius:10,border:'1px solid #2a2a3e',background:'#1A1A2E',color:'#aaa',fontSize:16,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>⚙️</button>
           <button onClick={gazeLoading ? undefined : (gazeMode ? stopGaze : startGaze)} style={{ width:38,height:38,borderRadius:10,border:`1px solid ${gazeMode?'#4CC9F0':'#2a2a3e'}`,background:gazeMode?'rgba(76,201,240,0.15)':'#1A1A2E',color:gazeMode?'#4CC9F0':gazeLoading?'#555':'#aaa',fontSize:16,cursor:gazeLoading?'default':'pointer',display:'flex',alignItems:'center',justifyContent:'center',boxShadow:gazeMode?'0 0 12px rgba(76,201,240,0.3)':'none',opacity:gazeLoading?0.5:1 }} title={gazeLoading?'로딩 중...':'시선 트래킹'}>👁️</button>
           <button onClick={()=>{
-            if (gazeMode && mode==='play') showToast('👁️ 시선 트래킹이 일시 중지됩니다');
             setMode(m=>m==='play'?'record':'play');
           }} style={{ height:38,padding:'0 14px',borderRadius:50,border:'none',background:mode==='record'?'linear-gradient(135deg,#FF4D6D,#FF6B35)':'linear-gradient(135deg,#06D6A0,#4CC9F0)',color:'#fff',fontWeight:700,fontSize:12,cursor:'pointer',boxShadow:mode==='record'?'0 0 16px rgba(255,77,109,0.5)':'0 0 16px rgba(6,214,160,0.4)' }}>
             {mode==='record' ? (defaultRecType==='audio' ? '🎙 녹음' : '🔴 녹화') : '▶ 재생'}
@@ -2374,7 +2421,11 @@ function App() {
           const isDragFrom=dragFrom===i, isDragTo=dragTo===i;
           const isAudio = pad?.recType === 'audio';
           return (
-            <div key={i} data-pi={i} onPointerDown={e=>handlePadDown(e,i)} style={{
+            <div key={i} data-pi={i} tabIndex={0} role="button"
+              aria-label={pad?.label || `패드 ${i+1}`}
+              onPointerDown={e=>handlePadDown(e,i)}
+              onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();if(mode==='play'){resumeAudioCtx();unlockAudioPool();playPad(i);}else if(!recIdx){if(padsRef.current[i]){setConfirm({msg:defRecTypeRef.current==='audio'?'패드를 다시 녹음할까요?\n기존 녹음이 삭제됩니다.':'패드를 다시 녹화할까요?\n기존 녹화가 삭제됩니다.',onOk:()=>{setConfirm(null);setFilePicker({idx:i});}});}else{setFilePicker({idx:i});}}}}}
+              style={{
               aspectRatio:'1',borderRadius:16,
               background: pad?.thumb&&!(isPlay&&!isAudio)&&!isDragFrom ? `url(${pad.thumb}) center/cover` : `${color}22`,
               border: isDragTo?`2.5px solid #fff`:isRec?`2.5px solid #FF4D6D`:isPlay?`2.5px solid ${color}`:`2px solid ${color}44`,
